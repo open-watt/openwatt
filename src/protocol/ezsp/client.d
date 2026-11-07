@@ -208,9 +208,8 @@ nothrow @nogc:
 
         if (!aborting())
         {
-            bool success = send_command!R(&response, forward!args, cast(void*)&r, 1, false, &on_fail);
-            assert(success, "EZSP: failed to send command!");
-
+            if (!send_command!R(&response, forward!args, cast(void*)&r, 1, false, &on_fail))
+                return EZSPReply!R();
             if (yield(ev) == YieldResult.aborted && !ev.finished)
                 cancel_request(cast(void*)&r);
         }
@@ -246,6 +245,7 @@ nothrow @nogc:
             }
             else
             {
+                packet_free(_queued_requests[i].request);
                 _queued_requests.remove(i);
                 mark_set!(typeof(this), "queued")();
             }
@@ -336,7 +336,7 @@ nothrow @nogc:
                                                                           (const(ubyte)[] data){ EZSP_Command.Response r; data.ezsp_deserialise(r); return tconcat(r); }));
             }
 
-            ubyte[256] buffer = void; // TODO: what is the maximum ezsp payload length?
+            ubyte[max_payload] buffer = void;
             EZSP_Command.Request tr = void;
             tr.tupleof[] = args[];
             size_t offset = tr.ezsp_serialise(buffer[]);
@@ -352,53 +352,6 @@ nothrow @nogc:
                     return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), on_fail, response_handler, null, HasUserData ? user_data : null, priority, dei);
             }
         }
-    }
-
-    final int send_message(ushort cmd, const(ubyte)[] data)
-    {
-        if (!running)
-            return -1;
-
-        ubyte[256] buffer = void;
-        ubyte i = 0;
-
-        buffer[i++] = _sequence_number;
-
-        // the EZSP frame control byte (0x00)
-        buffer[i++] = 0x00;
-        if (_known_version >= 8)
-            buffer[i++] = 0x01;
-
-        if (cmd != 0 && _known_version < 8)
-        {
-            // For all EZSPv6 or EZSPv7 frames except 'version' frame, force an extended header 0xff 0x00
-            buffer[i++] = 0xFF;
-            buffer[i++] = 0x00;
-        }
-
-        buffer[i++] = cast(ubyte)cmd;
-        if (_known_version >= 8)
-            buffer[i++] = cmd >> 8;
-
-        buffer[i .. i + data.length] = data[];
-        i += data.length;
-
-        version(DebugMessageFlow)
-        {
-            CommandData* cmdName = cmd in commandNames;
-            log.tracef("--> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
-        }
-
-        if (ash_send(buffer[0..i]) < 0)
-        {
-            version(DebugMessageFlow)
-                log.trace("send failed!");
-
-            // error?!
-            return -1;
-        }
-
-        return _sequence_number++;
     }
 
 protected:
@@ -453,8 +406,7 @@ protected:
                 log.debug_("connecting...");
 
                 _requested_version = PREFERRED_VERSION;
-                immutable ubyte[4] version_msg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
-                ash_send(version_msg);
+                send_version();
 
                 _last_event = getTime();
             }
@@ -475,14 +427,16 @@ protected:
 
         // complete every outstanding request as failed; nothing may be left waiting on a
         // response that can never arrive (send_command rejects new requests while not running)
-        foreach (ref req; _queued_requests)
+        _in_flight = 0;
+        while (_queued_requests.length)
         {
+            QueuedRequest req = _queued_requests[0];
+            _queued_requests.popFront();
+            mark_set!(typeof(this), "queued")();
+            packet_free(req.request);
             if (req.fail_shim)
                 req.fail_shim(req.cb_funcptr, req.cb_instance, req.user_data);
         }
-        _queued_requests.clear();
-        mark_set!(typeof(this), "queued")();
-        _in_flight = 0;
 
         if (_ash)
         {
@@ -509,8 +463,8 @@ protected:
             auto fail = _queued_requests[0].fail_shim;
             void* cb = _queued_requests[0].cb_funcptr, inst = _queued_requests[0].cb_instance, ud = _queued_requests[0].user_data;
             _queued_requests.popFront();
-            mark_set!(typeof(this), "queued")();
             --_in_flight;
+            mark_set!(typeof(this), "queued")();
             if (fail)
                 fail(cb, inst, ud);
             restart();
@@ -533,13 +487,12 @@ private:
         ubyte priority;         // pcp rank; higher jumps ahead of pending lower-priority commands
         bool dei;
         ushort cmd;
-        ushort data_len;
         void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
         void function(void*, void*, void*) nothrow @nogc fail_shim;
         void* cb_funcptr;
         void* cb_instance;
         void* user_data;
-        ubyte[256] data;        // stashed request payload (inline so entries stay POD/swappable)
+        Packet* request;        // the serialised parameters until the request is sent
     }
 
     struct CommandHandler
@@ -554,12 +507,17 @@ private:
 
     enum max_queued_requests = 32;
 
+    // sequence, frame control and command, either 2 bytes each of the latter (v8) or 1 each behind a legacy 0xFF 0x00
+    enum ubyte max_header = 5;
+    enum size_t max_payload = 256;
+
     enum request_timeout = 20.seconds;
 
     MonoTime _last_event;
 
     ubyte _in_flight;
     ubyte _concurrency = 1;
+    bool _draining;
 
     ubyte _requested_version;
     ubyte _known_version;
@@ -588,11 +546,12 @@ private:
         Map!(ushort, CommandData) commandNames;
     }
 
-    int ash_send(const(ubyte)[] data)
+    void send_version()
     {
+        ubyte[4] version_msg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
         StackPacket p;
-        p.init!RawFrame(data);
-        return _ash.forward(&p.packet);
+        p.init!RawFrame(version_msg[]);
+        _ash.forward(&p.packet);
     }
 
     void ash_state_change(ActiveObject, StateSignal signal)
@@ -690,8 +649,7 @@ private:
                 {
                     // we'll negotiate down to the version it supports
                     _requested_version = r.protocolVersion;
-                    immutable ubyte[4] versionMsg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
-                    ash_send(versionMsg);
+                    send_version();
                     break;
                 }
 
@@ -749,8 +707,8 @@ private:
                     version (DebugZigbeeLatency)
                         Duration rtt = getTime() - _queued_requests[0].ts;
                     _queued_requests.popFront();
-                    mark_set!(typeof(this), "queued")();
                     --_in_flight;
+                    mark_set!(typeof(this), "queued")();
 
                     version (DebugZigbeeLatency)
                     {
@@ -780,57 +738,60 @@ private:
         }
     }
 
-    bool send_command_impl(ushort cmd, ubyte[] data,
+    // a full queue takes a request only in place of a queued DEI request of no higher priority
+    bool send_command_impl(ushort cmd, const(ubyte)[] data,
                            void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler,
                            void function(void*, void*, void*) nothrow @nogc failure_handler,
                            void* cb, void* inst, void* user_data, ubyte priority = 1, bool dei = false)
     {
-        if (data.length > QueuedRequest.data.length)
-            return false;
-
-        void function(void*, void*, void*) nothrow @nogc dropped_fail;
-        void* dropped_cb;
-        void* dropped_inst;
-        void* dropped_ud;
+        size_t evict = size_t.max;
         if (_queued_requests.length >= max_queued_requests)
         {
-            size_t drop = _queued_requests.length;
             if (!dei)
             {
                 foreach (i; _in_flight .. _queued_requests.length)
                 {
                     if (_queued_requests[i].dei && _queued_requests[i].priority <= priority &&
-                        (drop == _queued_requests.length || _queued_requests[i].priority < _queued_requests[drop].priority))
-                        drop = i;
+                        (evict == size_t.max || _queued_requests[i].priority < _queued_requests[evict].priority))
+                        evict = i;
                 }
             }
-
-            if (drop == _queued_requests.length)
+            if (evict == size_t.max)
             {
                 log.warningf("command queue full ({0}); rejecting cmd x{1,04x} pri {2}", max_queued_requests, cmd, priority);
                 return false;
             }
-
-            dropped_fail = _queued_requests[drop].fail_shim;
-            dropped_cb = _queued_requests[drop].cb_funcptr;
-            dropped_inst = _queued_requests[drop].cb_instance;
-            dropped_ud = _queued_requests[drop].user_data;
-            _queued_requests.remove(drop);
-            mark_set!(typeof(this), "queued")();
+        }
+        // the evicted request's page is freed before its replacement allocates, so eviction needs no spare page
+        void function(void*, void*, void*) nothrow @nogc dropped_fail;
+        void* dropped_cb;
+        void* dropped_inst;
+        void* dropped_ud;
+        if (evict != size_t.max)
+        {
+            dropped_fail = _queued_requests[evict].fail_shim;
+            dropped_cb = _queued_requests[evict].cb_funcptr;
+            dropped_inst = _queued_requests[evict].cb_instance;
+            dropped_ud = _queued_requests[evict].user_data;
+            packet_free(_queued_requests[evict].request);
+            _queued_requests.remove(evict);
         }
 
-        ref QueuedRequest req = _queued_requests.pushBack();
+        Packet* request = alloc_packet!RawFrame(data, max_header);
+        if (request)
+        {
+            ref QueuedRequest req = _queued_requests.pushBack();
+            req.cmd = cmd;
+            req.priority = priority;
+            req.dei = dei;
+            req.response_shim = response_handler;
+            req.fail_shim = failure_handler;
+            req.cb_funcptr = cb;
+            req.cb_instance = inst;
+            req.user_data = user_data;
+            req.request = request;
+        }
         mark_set!(typeof(this), "queued")();
-        req.cmd = cmd;
-        req.priority = priority;
-        req.dei = dei;
-        req.response_shim = response_handler;
-        req.fail_shim = failure_handler;
-        req.cb_funcptr = cb;
-        req.cb_instance = inst;
-        req.user_data = user_data;
-        req.data_len = cast(ushort)data.length;
-        req.data[0 .. data.length] = data[];
 
         if (_queued_requests.length > _peak_queue)
         {
@@ -846,6 +807,8 @@ private:
 
         if (dropped_fail)
             dropped_fail(dropped_cb, dropped_inst, dropped_ud);
+        if (!request)
+            return false;
 
         send_queued_message();
         return true;
@@ -854,12 +817,58 @@ private:
     // Requests [0 .. _in_flight) have been transmitted and await ordered responses. The ASH window
     // is kept equal to this limit, so changing concurrency live changes admission without dropping
     // frames already on the wire.
+    // takes the queue's own packets, which are unique and reserve max_header
+    bool send_message(ubyte seq, ushort cmd, Packet* packet)
+    {
+        bool v8 = _known_version >= 8;
+        bool extended = cmd != 0 && !v8;
+        size_t length = (v8 ? 5 : 3) + (extended ? 2 : 0);
+        ubyte[] buffer = cast(ubyte[])packet.alloc_prefix(length);
+        debug assert(buffer, "a queued request reserves the EZSP header");
+        size_t i = 0;
+
+        buffer[i++] = seq;
+
+        // the EZSP frame control byte (0x00)
+        buffer[i++] = 0x00;
+        if (v8)
+            buffer[i++] = 0x01;
+
+        // For all EZSPv6 or EZSPv7 frames except 'version' frame, force an extended header 0xff 0x00
+        if (extended)
+        {
+            buffer[i++] = 0xFF;
+            buffer[i++] = 0x00;
+        }
+
+        buffer[i++] = cast(ubyte)cmd;
+        if (v8)
+            buffer[i++] = cmd >> 8;
+
+        version(DebugMessageFlow)
+        {
+            CommandData* cmdName = cmd in commandNames;
+            log.tracef("--> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", seq, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(cast(const(ubyte)[])packet.data[length .. $]) : null, packet.data, cmdName !is null);
+        }
+
+        if (_ash.forward(packet) < 0)
+        {
+            version(DebugMessageFlow)
+                log.trace("send failed!");
+            return false;
+        }
+        return true;
+    }
+
+    // a request submitted while a send is handing off waits for the outer pass, which keeps the wire in queue order
     void send_queued_message()
     {
-        if (_in_flight >= _concurrency || _queued_requests.length == 0)
+        if (_draining)
             return;
+        _draining = true;
+        scope (exit) _draining = false;
 
-        while (_in_flight < _concurrency && _in_flight < _queued_requests.length)
+        while (running && _in_flight < _concurrency && _in_flight < _queued_requests.length)
         {
             size_t best = _in_flight;
             foreach (i; _in_flight + 1 .. _queued_requests.length)
@@ -876,25 +885,35 @@ private:
                 *b = tmp;
             }
 
-            ref QueuedRequest req = _queued_requests[_in_flight];
-            int seq = send_message(req.cmd, req.data[0 .. req.data_len]);
-            if (seq < 0)
-            {
-                // transport rejected the frame; complete the request as failed
-                log.warningf("transport rejected cmd x{0,04x}; completing as failed", req.cmd);
-                auto fail = req.fail_shim;
-                void* cb = req.cb_funcptr, inst = req.cb_instance, ud = req.user_data;
-                _queued_requests.remove(_in_flight);
-                mark_set!(typeof(this), "queued")();
-                if (fail)
-                    fail(cb, inst, ud);
-                continue;
-            }
-            req.sequence_number = cast(ubyte)seq;
+            // in flight before the send, whose observers may submit or cancel
+            ref QueuedRequest req = _queued_requests[_in_flight++];
+            Packet* request = req.request;
+            req.request = null;
+            ubyte seq = _sequence_number++;
+            ushort cmd = req.cmd;
+            req.sequence_number = seq;
             req.ts = getTime();
-            ++_in_flight;
+            log.tracef("--> cmd x{0,04x} seq {1} pri {2} (in-flight {3}, queued {4})", cmd, seq, req.priority, _in_flight, _queued_requests.length - _in_flight);
+            if (!send_message(seq, cmd, request))
+                fail_unsent(seq, cmd);
+        }
+    }
 
-            log.tracef("--> cmd x{0,04x} seq {1} pri {2} (in-flight {3}, queued {4})", req.cmd, req.sequence_number, req.priority, _in_flight, _queued_requests.length - _in_flight);
+    void fail_unsent(ubyte seq, ushort cmd)
+    {
+        log.warningf("transport rejected cmd x{0,04x}; completing as failed", cmd);
+        foreach (i; 0 .. _in_flight)
+        {
+            if (_queued_requests[i].sequence_number != seq)
+                continue;
+            auto fail = _queued_requests[i].fail_shim;
+            void* cb = _queued_requests[i].cb_funcptr, inst = _queued_requests[i].cb_instance, ud = _queued_requests[i].user_data;
+            _queued_requests.remove(i);
+            --_in_flight;
+            mark_set!(typeof(this), "queued")();
+            if (fail)
+                fail(cb, inst, ud);
+            return;
         }
     }
 }

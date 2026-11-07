@@ -1310,33 +1310,23 @@ nothrow @nogc:
 
 protected:
 
-    // wrap the raw frame into a CPCFrame (borrowing the payload) and forward it to the trunk; the trunk
-    // copies it into this endpoint's channel on transmit(), so the borrow only needs to last that call.
+    // the raw frame becomes this endpoint's CPCFrame and goes to the trunk
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
-        scope (exit) packet_free(packet);
-        if (packet.type != PacketType.raw)
-            return -1;
         CPCInterface trunk = _cpc.get;
-        if (!trunk || !_connected)
-        {
-            add_tx_drop();
-            return -1;
-        }
+        if (packet.type != PacketType.raw || !trunk || !_connected)
+            return drop_tx(packet);
 
-        StackPacket cpc_packet;
-        CPCFrame* f = &cpc_packet.init!CPCFrame(packet.data, packet.creation_time);
+        size_t length = packet.data.length;
+        CPCFrame* f = &packet.reframe!CPCFrame();
         f.endpoint = ubyte(_endpoint);
         f.control = 0; // the trunk stamps the control byte at emit
-        cpc_packet.pcp = packet.pcp;
-        cpc_packet.dei = packet.dei;
-
-        if (trunk.forward(&cpc_packet.packet, callback, queue_policy) < 0)
+        if (trunk.forward(packet, callback, queue_policy) < 0)
         {
             add_tx_drop();
             return -1;
         }
-        add_tx_frame(packet.data.length);
+        add_tx_frame(length);
         return 0;
     }
 
