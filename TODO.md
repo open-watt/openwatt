@@ -1497,10 +1497,6 @@ this is what remains.
 
 ## Infrastructure
 
-- **Unpin DMD in CI** (2026-11-05): `ci.yml` pins DMD to 2.114.0-beta.1 because the `dmd-master`
-  nightly cannot build us. Return to `dmd-master` once a nightly carries dmd#24224; the
-  virtual-destructor work needs dmd#23946, which is only in master until 2.115.
-
 - **Delete the ClassInfo layout probe ASAP**: urt's `platforms.mk` probes the compiler's druntime
   and sets `ClassInfoNoVtbl`, which drops `vtbl` from `object.d`'s `TypeInfo_Class` and `Interface`
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
