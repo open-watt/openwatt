@@ -104,8 +104,19 @@ protected:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
+        // Address observers can replace the client synchronously.
         c.subscribe(&state_change);
         _subscribed = true;
+
+        if (_bound_device)
+        {
+            DeviceBuilder builder = _bound_device.edit();
+            Element* address = builder.element("status.network.ip.address", register_value_format!(const(char)[])());
+            builder.commit();
+            if (_state == State.starting && _client.get is c)
+                address.value = c.get_address();
+        }
+
         return CompletionStatus.complete;
     }
 
@@ -182,20 +193,6 @@ protected:
 
     final override const(char)[] model_name() const pure
         => _model_name[];
-
-    final override bool materialise()
-    {
-        if (!super.materialise())
-            return false;
-        if (AA55Client c = _client.get)
-        {
-            if (!_bound_device)
-                return true;
-            DeviceBuilder builder = _bound_device.edit();
-            builder.element("status.network.ip.address", register_value_format!(const(char)[])()).value = c.get_address();
-        }
-        return true;
-    }
 
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
@@ -332,5 +329,86 @@ private:
             version (DebugGoodWeBinding)
                 log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, el.id, el.value);
         }
+    }
+
+    unittest
+    {
+        import urt.inet : InetAddress, IPAddr;
+
+        enum address_path = "status.network.ip.address";
+        DeviceTable devices;
+        DeviceBuilder builder = devices.create("goodwe-address-test");
+        Device device = builder.device;
+        builder.commit();
+
+        AA55Client client = Collection!AA55Client().create("goodwe-address-client");
+        AA55Client replacement = Collection!AA55Client().create("goodwe-address-replacement");
+        GoodWeBinding binding = Collection!GoodWeBinding().create("goodwe-address-binding");
+        scope (exit)
+        {
+            binding._profile_data = null;
+            binding.destroy();
+            client.destroy();
+            replacement.destroy();
+            Collection!ProtocolBinding().update_all();
+            Collection!AA55Client().update_all();
+        }
+
+        // Seed the materialised state so the fixture needs no profile files or socket.
+        Profile materialised;
+        binding._profile_data = &materialised;
+        binding._bound_device = device;
+        binding._device = StringLit!"goodwe-address-test";
+        binding._profile_name = StringLit!"address-test";
+        binding._client = client;
+        Collection!ProtocolBinding().update_all();
+        assert(!binding.running && !device.find_element(address_path));
+
+        client.remote(InetAddress(IPAddr(192, 0, 2, 1), 8899));
+        client.set_state_deferred(State.running);
+        Collection!ProtocolBinding().update_all();
+        Element* address = device.find_element(address_path);
+        assert(binding.running && address && address.value.asString == "192.0.2.1");
+
+        binding._profile_data = null;
+        binding._profile_name = null;
+        client.set_state_deferred(State.disabled);
+        assert(!binding.running && !binding._bound_device && !binding._subscribed);
+
+        binding._profile_data = &materialised;
+        binding._bound_device = device;
+        binding._profile_name = StringLit!"address-test";
+        client.remote(InetAddress(IPAddr(192, 0, 2, 2), 8899));
+        Collection!ProtocolBinding().update_all();
+        assert(!binding.running && address.value.asString == "192.0.2.1");
+
+        static struct RebindClient
+        {
+            GoodWeBinding binding;
+            AA55Client replacement;
+
+            void receive(ref const SampleUpdate) nothrow @nogc
+            {
+                binding._profile_data = null;
+                binding.client(replacement);
+            }
+        }
+        RebindClient rebind = RebindClient(binding, replacement);
+        address.subscribe(&rebind.receive);
+        client.set_state_deferred(State.running);
+        Collection!ProtocolBinding().update_all();
+        address.unsubscribe(&rebind.receive);
+        assert(address.value.asString == "192.0.2.2");
+        assert(!binding.running && !binding._subscribed && binding.client is replacement);
+
+        binding._profile_data = &materialised;
+        binding._bound_device = device;
+        replacement.remote(InetAddress(IPAddr(192, 0, 2, 3), 8899));
+        replacement.set_state_deferred(State.running);
+        Collection!ProtocolBinding().update_all();
+        assert(binding.running && address.value.asString == "192.0.2.3");
+
+        client.set_state_deferred(State.disabled);
+        assert(binding.running && binding._subscribed);
     }
 }

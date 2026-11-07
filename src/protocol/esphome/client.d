@@ -239,18 +239,38 @@ package:
     const(char)[] get_address() const
     {
         import urt.mem.temp : tstring;
-        if (_host)
-            return _host[];
-        else if (_remote.family == AddressFamily.ipv4)
-            return _remote._a.ipv4.addr.tstring;
-        else if (_remote.family == AddressFamily.ipv6)
-            return _remote._a.ipv6.addr.tstring;
-        return null;
+        InetAddress endpoint = _stream ? _stream.remote_address : _remote;
+        if (endpoint.family == AddressFamily.ipv4)
+            return endpoint._a.ipv4.addr.tstring;
+        if (endpoint.family == AddressFamily.ipv6)
+            return endpoint._a.ipv6.addr.tstring;
+        return _host[];
+    }
+
+    unittest
+    {
+        ESPHomeClient client = alloc!ESPHomeClient(CID(1));
+        scope(exit) free(client);
+        TCPStream wire = alloc!TCPStream(CID(2), ObjectFlags.disabled);
+        scope(exit) free(wire);
+
+        client._host = StringLit!"test.invalid";
+        assert(client.get_address() == "test.invalid");
+        client._stream = wire;
+        assert(client.get_address() == "test.invalid");
+
+        InetAddress resolved = InetAddress(IPAddr(192, 0, 2, 1), 6053);
+        wire.remote(resolved);
+        assert(client.get_address() == "192.0.2.1");
+
+        client._stream = null;
+        client.remote(resolved);
+        assert(client.get_address() == "192.0.2.1");
     }
 
 private:
     Array!ubyte _tail;
-    Stream _stream;
+    TCPStream _stream;
 
     Array!ESPHomeMessageHandler _subscribers;
 
