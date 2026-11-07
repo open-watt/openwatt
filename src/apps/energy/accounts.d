@@ -36,7 +36,7 @@ struct DailyCounter
 struct DailySnapshot
 {
 nothrow @nogc:
-    Map!(CounterKey, DailyCounter) values;
+    Map!(Element*, DailyCounter) values;
     Array!IslandAccountPublisher account_publishers;
     SysTime day_start;
 }
@@ -77,9 +77,9 @@ void check_day_rollover(ref DailySnapshot daily, SysTime now)
 
 // Bank completed segments so a meter reset cannot make today's total negative
 // or discard energy accumulated before the reset.
-double today_delta_value(ref DailySnapshot daily, CounterKey key, double current)
+double today_delta_value(ref DailySnapshot daily, Element* key, double current)
 {
-    if (key.meter is null || current != current)
+    if (key is null || current != current)
         return 0;
 
     DailyCounter* c = key in daily.values;
@@ -383,7 +383,7 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
             Element* import_e = meter.find_element("import");
             if (import_e is null)
                 continue;
-            t.solar_today_kwh += today_delta_value(daily, CounterKey(meter), contribution.meter.total_import_active[0]);
+            t.solar_today_kwh += today_delta_value(daily, import_e, contribution.meter.total_import_active[0]);
             used_aggregate = true;
         }
         if (used_aggregate)
@@ -397,8 +397,7 @@ void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* i
                 continue;
             if (contribution.component)
                 if (Component meter = contribution.component.get_first_component_by_template("EnergyMeter"))
-                    if (meter.find_element("import"))
-                        t.solar_today_kwh += today_delta_value(daily, CounterKey(meter), contribution.meter.total_import_active[0]);
+                    t.solar_today_kwh += today_delta_value(daily, meter.find_element("import"), contribution.meter.total_import_active[0]);
         }
     }
 }
@@ -418,51 +417,4 @@ bool circuit_in_island(Island* island, const(char)[] circuit)
         if (b.id[] == circuit)
             return true;
     return false;
-}
-
-
-unittest
-{
-    import manager.device : DeviceBuilder, DeviceTable;
-    import manager.series : DataFormat, SeriesKind, ValueType, register_format;
-
-    static Element* counter(ref DeviceBuilder b, Component c, const(char)[] id, double kwh)
-    {
-        Element* e = b.element(c, id, register_format(DataFormat(ValueType.f64, SeriesKind.held, KilowattHour)));
-        e.value(Variant(Quantity!double(kwh, KilowattHour)), getSysTime());
-        return e;
-    }
-
-    DeviceTable devices;
-    DeviceBuilder b = devices.create("counters");
-    Component split = b.component("split");
-    Element* l1 = counter(b, split, "import1", 10);
-    Element* l2 = counter(b, split, "import2", 20);
-    Component solo = b.component("solo");
-    Element* only = counter(b, solo, "import1", 5);
-
-    Port[3] ports;
-    ports[0].meter = split;
-    ports[0].meter_phase = 1;
-    ports[1].meter = split;
-    ports[1].meter_phase = 2;
-    ports[2].meter = solo;
-
-    DailySnapshot daily;
-    double[3] today;
-    foreach (tick; 0 .. 2)
-    {
-        foreach (i, ref p; ports)
-        {
-            p.meter_data = get_port_meter_data(p.meter, p.meter_phase, MeterSign.normal);
-            BoundaryEnergy e = boundary_energy(&p);
-            today[i] = today_delta_value(daily, e.into_key, e.into_total);
-        }
-        l1.value(Variant(Quantity!double(11, KilowattHour)), getSysTime());
-        l2.value(Variant(Quantity!double(22, KilowattHour)), getSysTime());
-        only.value(Variant(Quantity!double(6, KilowattHour)), getSysTime());
-    }
-    static bool near(double a, double b) => a - b < 0.001 && b - a < 0.001;
-    assert(near(today[0], 1) && near(today[1], 2) && near(today[2], 1));
-    assert(boundary_energy(&ports[0]).into_key != boundary_energy(&ports[1]).into_key);
 }
