@@ -581,7 +581,7 @@ nothrow @nogc:
         {
             bool flag = false;
             foreach (ref prod; graph.productions[])
-                if (prod.owner == p.owner.name[] && prod.group == production_group_of(p))
+                if (prod.owner == p.owner.name[] && prod.group == production_group(p))
                 {
                     flag = prod.mismatch;
                     break;
@@ -609,13 +609,6 @@ nothrow @nogc:
         e.value(last, ts);
     }
 
-    const(char)[] production_group_of(Port* p)
-    {
-        if (p.path.length == 0)
-            return "pv";
-        size_t dot = p.path[].findLast('.');
-        return dot < p.path.length ? p.path[0 .. dot] : p.path[];
-    }
 }
 
 private struct CircuitBusPublishCache

@@ -128,6 +128,21 @@ bool is_boundary(Port* p) pure
     return p.bus.contains_grid && p.group.kind != PortGroupKind.appliance;
 }
 
+bool unmetered_interior(Port* p) pure
+    => p.meter is null && !is_boundary(p);
+
+const(char)[] production_owner(Port* p) pure
+    => p.owner ? p.owner.name[] : p.label;
+
+const(char)[] production_group(Port* p) pure
+{
+    const(char)[] path = p.path[];
+    if (path.length == 0)
+        return "pv";
+    size_t dot = path.findLast('.');
+    return dot < path.length ? path[0 .. dot] : path;
+}
+
 // External boundaries face away from the modeled graph: their Bus in the
 // Bus -> Port frame is the unmodeled world, flipping account orientation.
 bool external_boundary(Port* p) pure
@@ -1500,18 +1515,22 @@ private:
         {
             if (p.role != PortRole.pv || p.implicit)
                 continue;
-            if (p.meter is null && !is_boundary(p))
-                continue;
 
-            const(char)[] owner_name = p.owner ? p.owner.name[] : p.label;
+            const(char)[] owner_name = production_owner(p);
             if (owner_name.length == 0)
                 continue;
 
             const(char)[] group = production_group(p);
+            add_production_aggregate_once(p.owner, group);
+            if (unmetered_interior(p))
+                continue;
+
             ProductionContribution member;
             member.owner = retain_production_string(owner_name);
             member.group = retain_production_string(group);
+            member.port = p;
             member.kind = ProductionContributionKind.member;
+            member.import_counter = port_import_counter(p);
             member.meter = p.meter_data;
             if (member.meter.has(MeterField.power))
             {
@@ -1526,12 +1545,22 @@ private:
                 }
             }
             production_contributions ~= member;
-
-            if (p.owner !is null)
-                add_production_aggregate_once(p.owner, group);
         }
 
         reconcile_productions(production_contributions, productions);
+    }
+
+    Element* port_import_counter(Port* port)
+    {
+        if (!port.meter)
+            return null;
+        const(char)[] field = port.meter_sign == MeterSign.inverted ? "export" : "import";
+        if (port.meter_phase == 0)
+            return port.meter.find_element(field);
+        char[7] name;
+        name[0 .. 6] = field[];
+        name[6] = cast(char)('0' + port.meter_phase);
+        return port.meter.find_element(name[]);
     }
 
     void add_production_aggregate_once(Appliance owner, const(char)[] group)
@@ -1554,6 +1583,7 @@ private:
         contribution.owner = retain_production_string(owner.name[]);
         contribution.group = retain_production_string(group);
         contribution.kind = ProductionContributionKind.aggregate;
+        contribution.import_counter = meter.find_element("import");
         contribution.meter = get_meter_data(meter);
         production_contributions ~= contribution;
     }
@@ -1564,21 +1594,6 @@ private:
             return "";
         production_strings ~= value.make_string();
         return production_strings[production_strings.length - 1][];
-    }
-
-    const(char)[] production_group(Port* p) pure
-    {
-        if (p is null || p.path.length == 0)
-            return "pv";
-        return production_group(p.path[]);
-    }
-
-    const(char)[] production_group(const(char)[] path) pure
-    {
-        if (path.length == 0)
-            return "pv";
-        size_t dot = path.findLast('.');
-        return dot < path.length ? path[0 .. dot] : path;
     }
 
     bool infer_single_dark_port(Bus* b)
@@ -1784,6 +1799,37 @@ unittest
 
     graph.clear();
     assert(graph.ports.length == 0 && graph.groups.length == 0 && graph.bus_list.length == 0);
+
+    {
+        import manager.device : DeviceTable;
+
+        DeviceTable devices;
+        auto builder = devices.create("pv-counter-source");
+        Component port = builder.component("solar", "Port");
+        Component local_meter = builder.component(port, "meter", "EnergyMeter");
+        Component selected_meter = builder.component("selected_meter", "EnergyMeter");
+        auto format = register_value_format!float();
+        builder.element(local_meter, "export2", format);
+        builder.element(selected_meter, "export", format);
+        Element* phase_import = builder.element(selected_meter, "import2", format);
+        Element* phase_export = builder.element(selected_meter, "export2", format);
+        Bus* site = graph.ensure_bus("site");
+        Port* solar = graph.add_port(null, site, PortRole.pv, FlowDomain.supply, selected_meter, 2,
+                                    MeterSign.inverted, "solar", "inverter", port);
+        graph.add_to_group(graph.add_group("inverter", PortGroupKind.appliance), solar);
+
+        graph.rebuild_productions();
+        assert(graph.production_contributions.length == 1);
+        assert(graph.production_contributions[0].import_counter is phase_export);
+        solar.meter_sign = MeterSign.normal;
+        graph.rebuild_productions();
+        assert(graph.production_contributions[0].import_counter is phase_import);
+        solar.meter_sign = MeterSign.inverted;
+        solar.meter_phase = 1;
+        graph.rebuild_productions();
+        assert(graph.production_contributions[0].import_counter is null);
+        graph.clear();
+    }
 
     // sink absorption: the bus residual solves the connected port, group
     // conservation pushes it out the dangling boundary
