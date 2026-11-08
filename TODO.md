@@ -901,6 +901,8 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
   netconsole, and neither does anything `/system/reboot` or the boot guard's revert logs last.
   Drain the sinks before resetting.
 
+- **Parse the two-character relational operators first.** `parse_relational_exp`
+  consumes `<` and `>` before trying `<=` and `>=`, leaving an unexpected `=`.
 - **Give the CLI reference a consistent order**: `docs/CLI.md` is loosely grouped by
   subsystem, but command paths within groups are unsorted and later additions sit outside
   their groups. Keep related commands together and sort paths within each group.

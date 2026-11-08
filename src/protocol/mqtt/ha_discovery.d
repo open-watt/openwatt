@@ -1251,6 +1251,7 @@ unittest
     assert(manufacturer && manufacturer.value.asString == "Acme");
     Element* power = device.find_element("ha.power");
     assert(power && power.name[] == "Power" && power.display_unit[] == "W");
+    assert(!power.has_value && power.record_count == 0);
     assert(device.find_element("ha.power2"));
     assert(device.find_element("ha.frequency"));
     Element* wifi_ssid = device.find_element("status.network.wifi.ssid");

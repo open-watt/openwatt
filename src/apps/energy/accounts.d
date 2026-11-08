@@ -5,27 +5,21 @@ import urt.lifetime;
 import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat;
-import urt.si.quantity;
-import urt.si.unit;
 import urt.string;
 import urt.time;
 import urt.variant;
 
 import apps.energy.appliance;
 import apps.energy.meter;
-import apps.energy.production;
 import apps.energy.topology;
 
-import manager.component;
 import manager.device;
 import manager.element;
 
 nothrow @nogc:
 
 
-// TODO(0.6, db.Stream): replace with `value_at(source, midnight)` queries when
-// db.Stream lands. The snapshot currently has to follow corrected meter_data so
-// daily and live accounts use the same sign and phase conventions.
+// TODO(0.6, db.Stream): replace with `value_at(source, midnight)` queries when db.Stream lands.
 struct DailyCounter
 {
     double anchor = 0;
@@ -80,7 +74,7 @@ void check_day_rollover(ref DailySnapshot daily, SysTime now)
 double today_delta_value(ref DailySnapshot daily, Element* key, double current)
 {
     if (key is null || current != current)
-        return 0;
+        return double.nan;
 
     DailyCounter* c = key in daily.values;
     if (!c)
@@ -104,8 +98,8 @@ struct IslandTotals
     float grid_power = 0;             // positive is importing
     float rogue_generation_power = 0;
     float rogue_load_power = 0;
-    float generation_power = 0;
-    float load_power = 0;
+    float generation_power = float.nan;
+    float load_power = float.nan;
 
     float local_fraction = float.nan;
 
@@ -176,7 +170,7 @@ nothrow @nogc:
     {
         if (!seen || !same_float(value, last))
         {
-            element.value(value, ts);
+            publish_float(element, value, ts);
             last = value;
             seen = true;
         }
@@ -282,18 +276,30 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
         }
     }
 
-    add_boundary_energy(t, island, graph, daily);
-
-    // Solar daily counters still reconcile through productions: an inferred
-    // boundary (implicit pv terminal) has no counter of its own, but its bus's
-    // interior mppt meters count the same energy.
-    add_production_today(t, graph, island, daily);
-
     add_island_rogue(t, island);
+    bool[BoundaryKind.max + 1] missing_power;
+    complete_boundary_totals(t, island, graph, daily, missing_power);
+    if (missing_power[BoundaryKind.grid])
+        t.grid_power = float.nan;
+    if (missing_power[BoundaryKind.solar])
+        t.solar_power = float.nan;
+    if (missing_power[BoundaryKind.battery])
+        t.battery_power = float.nan;
+    if (missing_power[BoundaryKind.generator])
+        generator_power = float.nan;
+    if (missing_power[BoundaryKind.unclassified])
+        t.rogue_generation_power = t.rogue_load_power = float.nan;
+
+    // Interior PV can require daily reconciliation without a solar boundary.
+    foreach (p; graph.ports[])
+        if (p.role == PortRole.pv && island_contains(island, boundary_bus(p)))
+        {
+            t.solar_today_kwh = double.nan;
+            break;
+        }
 
     // Keep grid separate so load = generation + grid before the zero clamp.
     t.generation_power = t.solar_power + generator_power + t.battery_power + t.rogue_generation_power;
-
     t.load_power = t.generation_power + t.grid_power;
     if (t.load_power < 0)
         t.load_power = 0;
@@ -309,15 +315,19 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
     return t;
 }
 
-void add_boundary_energy(ref IslandTotals t, Island* island, ref TopologyGraph graph, ref DailySnapshot daily)
+void complete_boundary_totals(ref IslandTotals t, Island* island, ref TopologyGraph graph,
+                              ref DailySnapshot daily, ref bool[BoundaryKind.max + 1] missing_power)
 {
     foreach (p; graph.boundaries[])
     {
         Bus* b = boundary_bus(p);
         if (b is null || !island_contains(island, b))
             continue;
+        BoundaryKind kind = boundary_kind(p);
+        if (!p.meter_data.has(MeterField.power))
+            missing_power[kind] = true;
         BoundaryEnergy e = boundary_energy(p);
-        final switch (boundary_kind(p))
+        final switch (kind)
         {
             case BoundaryKind.grid:
                 t.grid_import_today_kwh += today_delta_value(daily, e.into_key, e.into_total);
@@ -328,6 +338,8 @@ void add_boundary_energy(ref IslandTotals t, Island* island, ref TopologyGraph g
                 t.battery_charge_today_kwh += today_delta_value(daily, e.out_key, e.out_total);
                 break;
             case BoundaryKind.solar:
+                t.solar_today_kwh = double.nan;
+                break;
             case BoundaryKind.generator:
             case BoundaryKind.load:
             case BoundaryKind.unclassified:
@@ -351,57 +363,6 @@ void add_island_rogue(ref IslandTotals t, Island* island)
     }
 }
 
-bool production_belongs_to_island(ref const Production production, ref TopologyGraph graph, Island* island)
-{
-    foreach (ref contribution; graph.production_contributions[])
-        if (contribution.owner == production.owner &&
-            contribution.group == production.group &&
-            circuit_in_island(island, contribution.circuit))
-            return true;
-    return false;
-}
-
-void add_production_today(ref IslandTotals t, ref TopologyGraph graph, Island* island, ref DailySnapshot daily)
-{
-    foreach (ref production; graph.productions[])
-    {
-        if (!production_belongs_to_island(production, graph, island))
-            continue;
-
-        bool used_aggregate;
-        foreach (ref contribution; graph.production_contributions[])
-        {
-            if (contribution.owner != production.owner || contribution.group != production.group)
-                continue;
-            if (contribution.kind != ProductionContributionKind.aggregate)
-                continue;
-            if (contribution.component is null)
-                continue;
-            Component meter = contribution.component.get_first_component_by_template("EnergyMeter");
-            if (meter is null)
-                continue;
-            Element* import_e = meter.find_element("import");
-            if (import_e is null)
-                continue;
-            t.solar_today_kwh += today_delta_value(daily, import_e, contribution.meter.total_import_active[0]);
-            used_aggregate = true;
-        }
-        if (used_aggregate)
-            continue;
-
-        foreach (ref contribution; graph.production_contributions[])
-        {
-            if (contribution.owner != production.owner || contribution.group != production.group)
-                continue;
-            if (!circuit_in_island(island, contribution.circuit))
-                continue;
-            if (contribution.component)
-                if (Component meter = contribution.component.get_first_component_by_template("EnergyMeter"))
-                    t.solar_today_kwh += today_delta_value(daily, meter.find_element("import"), contribution.meter.total_import_active[0]);
-        }
-    }
-}
-
 bool island_contains(Island* island, Bus* bus)
 {
     foreach (b; island.members[])
@@ -410,11 +371,71 @@ bool island_contains(Island* island, Bus* bus)
     return false;
 }
 
-// Production contributions carry circuit names, not bus pointers.
-bool circuit_in_island(Island* island, const(char)[] circuit)
+unittest
 {
-    foreach (b; island.members[])
-        if (b.id[] == circuit)
-            return true;
-    return false;
+    TopologyGraph graph;
+    scope(exit) graph.clear();
+    Bus* site = graph.ensure_bus("site");
+    Island island;
+    island.id = StringLit!"site";
+    island.root = site;
+    island.members ~= site;
+    DailySnapshot daily;
+
+    DeviceTable devices;
+    auto builder = devices.create("accounts-test");
+    auto publisher = IslandAccountPublisher();
+    publisher.bind(builder, "site");
+    SysTime now = getSysTime();
+    check_day_rollover(daily, now);
+    update_island_accounts(publisher, &island, graph, daily, now);
+    assert(publisher.solar_power.element.has_value && publisher.solar_power.element.value.asFloat == 0);
+    assert(publisher.load_power.element.has_value && publisher.load_power.element.value.asFloat == 0);
+    assert(publisher.solar_today_energy.element.has_value && publisher.solar_today_energy.element.value.asFloat == 0);
+
+    Port* solar = graph.add_port(null, site, PortRole.pv, FlowDomain.supply, null, 0, MeterSign.normal, "mppt", "inverter");
+    Port* grid = graph.add_port(null, site, PortRole.grid, FlowDomain.bidirectional, null, 0);
+    graph.add_to_group(graph.add_group("solar", PortGroupKind.appliance), solar);
+    graph.boundaries ~= solar;
+    graph.boundaries ~= grid;
+    grid.meter_data.write_value(MeterField.power, 0, 100);
+    grid.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    graph.reduce_boundary_flows();
+    update_island_accounts(publisher, &island, graph, daily, now);
+    assert(publisher.grid_power.element.value.asFloat == -100);
+    assert(!publisher.solar_power.element.has_value);
+    assert(!publisher.generation_power.element.has_value);
+    assert(!publisher.load_power.element.has_value);
+    assert(!publisher.solar_today_energy.element.has_value);
+    assert(!publisher.grid_today_import.element.has_value && !publisher.grid_today_export.element.has_value);
+    assert(publisher.battery_power.element.has_value && publisher.battery_power.element.value.asFloat == 0);
+
+    solar.meter_data.write_value(MeterField.power, 0, -150);
+    solar.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
+    graph.reduce_boundary_flows();
+    update_island_accounts(publisher, &island, graph, daily, now);
+    assert(publisher.solar_power.element.value.asFloat == 150);
+    assert(publisher.generation_power.element.value.asFloat == 150);
+    assert(publisher.load_power.element.value.asFloat == 50);
+
+    assert(!publisher.solar_today_energy.element.has_value);
+
+    graph.clear();
+    island.members.clear();
+    Bus* roof = graph.ensure_bus("roof");
+    island.root = roof;
+    island.members ~= roof;
+    Port* input = graph.add_port(null, roof, PortRole.pv, FlowDomain.supply, null, 0);
+    Port* output = graph.add_port(null, roof, PortRole.connection, FlowDomain.supply, null, 0);
+    PortGroup* inverter = graph.add_group("inverter", PortGroupKind.appliance);
+    graph.add_to_group(inverter, input);
+    graph.add_to_group(inverter, output);
+    graph.rebuild_boundaries();
+    assert(graph.boundaries.length == 0);
+
+    IslandAccountPublisher interior;
+    interior.bind(builder, "roof");
+    update_island_accounts(interior, &island, graph, daily, now);
+    assert(!interior.solar_today_energy.element.has_value);
+    assert(interior.solar_today_energy.element.record_update == SysTime.init);
 }

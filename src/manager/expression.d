@@ -533,9 +533,14 @@ nothrow @nogc:
                 return Variant(s);
             case Type.or:
             case Type.and:
-                bool l = left.evaluate(ctx).asBool();
-                bool r = right.evaluate(ctx).asBool();
-                return Variant(ty == Type.or ? l || r : l && r);
+                bool decisive = ty == Type.or;
+                Variant l = left.evaluate(ctx);
+                if (!l.isNull && l.asBool == decisive)
+                    return Variant(decisive);
+                Variant r = right.evaluate(ctx);
+                if (!r.isNull && r.asBool == decisive)
+                    return Variant(decisive);
+                return l.isNull || r.isNull ? Variant() : Variant(!decisive);
             case Type.eq:
             case Type.ne:
                 Variant l = left.evaluate(ctx);
@@ -546,6 +551,8 @@ nothrow @nogc:
             case Type.le:
                 Variant l = left.evaluate(ctx);
                 Variant r = right.evaluate(ctx);
+                if (l.isNull || r.isNull)
+                    return Variant();
                 return Variant(ty == Type.lt ? l < r : l <= r);
             case Type.add:
             case Type.sub:
@@ -1531,6 +1538,35 @@ unittest
     assert(e.cmd_list_source() == "/print hello");
 
     EvalContext ctx;
+
+    {
+        import manager.device : DeviceTable;
+        import manager.series : register_value_format;
+
+        DeviceTable devices;
+        auto builder = devices.create("expression-unseen");
+        ctx.root = builder.device;
+        builder.element("unseen", register_value_format!bool());
+        builder.element("number", register_value_format!int());
+        builder.constant("on", true);
+        builder.constant("off", false);
+        builder.commit();
+
+        Variant evaluate(const(char)[] expression)
+        {
+            Expression* parsed = parse_expression(expression);
+            assert(parsed && expression.empty);
+            scope(exit) free_expression(parsed);
+            return parsed.evaluate(ctx);
+        }
+
+        assert(evaluate("@unseen && @on").isNull && evaluate("@off || @unseen").isNull);
+        assert(evaluate("@number < 0").isNull && evaluate("0 < @number").isNull);
+        assert(evaluate("@off && @unseen") == Variant(false));
+        assert(evaluate("@unseen || @on") == Variant(true));
+        assert(evaluate("@number == null") == Variant(true));
+        ctx.root = null;
+    }
 
     // unary operators: '!' is logical, '-' is numeric
     text = "!1";

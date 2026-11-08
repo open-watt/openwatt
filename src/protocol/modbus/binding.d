@@ -628,6 +628,8 @@ private:
 
     bool emit_element(ref SampleElement e, void[] wire)
     {
+        if (!e.element.has_value)
+            return false;
         const(DataFormat)* fmt = e.desc.fmt;
         Variant value = e.element.value();
         if (fmt.is_text)
@@ -789,6 +791,8 @@ private:
                 continue;
             if (ent.register < start || ent.register >= cast(uint)start + count)
                 continue;
+            if (!ent.element.has_value)
+                return ExceptionCode.slave_device_failure;
             const ushort bit_index = cast(ushort)(ent.register - start);
             if (ent.element.value.asBool)
                 tmpbuf[1 + (bit_index >> 3)] |= cast(ubyte)(1 << (bit_index & 7));
@@ -1170,4 +1174,37 @@ private:
                 _has_dirty = true;  // re-arm so next update() ticks the deferred dirty bits
         }
     }
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+
+    import manager.sample.wire : WireFlags, WireKind, WireLayout;
+
+    ModbusBinding binding = alloc!ModbusBinding(CID(1));
+    scope(exit) free(binding);
+    Element coil, word;
+    coil.format = register_value_format!bool();
+    word.format = register_value_format!ushort();
+    ModbusBinding.SampleElement entry;
+    entry.regKind = cast(ubyte)RegisterType.coil;
+    entry.element = &coil;
+    binding.elements ~= entry;
+    entry.regKind = cast(ubyte)RegisterType.holding_register;
+    entry.element = &word;
+    entry.length = 2;
+    entry.desc = SampleDesc(WireLayout(WireKind.unsigned_, 16, 0, WireFlags.reverse), 1, word.format);
+    binding.elements ~= entry;
+
+    ubyte[4] address = [0, 0, 0, 1];
+    auto read_coil = ModbusPDU(FunctionCode.read_coils, address[]);
+    auto read_word = ModbusPDU(FunctionCode.read_holding_registers, address[]);
+    ModbusPDU response;
+    assert(binding.handle_request(read_coil, response) == ExceptionCode.slave_device_failure);
+    assert(binding.handle_request(read_word, response) == ExceptionCode.slave_device_failure);
+    coil.write_sample(false);
+    word.write_sample(ushort(0));
+    assert(binding.handle_request(read_coil, response) == ExceptionCode.none && response.data[1] == 0);
+    assert(binding.handle_request(read_word, response) == ExceptionCode.none && response.data[1] == 0 && response.data[2] == 0);
 }
