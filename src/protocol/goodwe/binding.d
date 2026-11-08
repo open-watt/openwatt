@@ -205,15 +205,8 @@ protected:
             return FormatId.invalid;
 
         SampleDesc sd = desc_by_index(aa55.desc);
-        const(DataFormat)* fmt = sd.fmt;
         if (!e.format.valid)
             e.format = sd.format;
-        if (fmt.is_scalar && e.record_update() == SysTime())
-        {
-            Scalar z;
-            z.u = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -410,5 +403,31 @@ private:
 
         client.set_state_deferred(State.disabled);
         assert(binding.running && binding._subscribed);
+    }
+    unittest
+    {
+        import urt.mem : alloc, free;
+        import protocol.goodwe : GoodWeModule, aa55_section_kind;
+
+        if (!aa55_section_kind)
+            aa55_section_kind = register_profile_section("aa55", alloc!GoodWeModule(null));
+        Profile* profile = parse_profile("elements:\n\taa55: 1, 0, u8\tdesc: level\n", "goodwe-first-sample");
+        assert(profile);
+        scope(exit) free(profile);
+        GoodWeBinding binding = alloc!GoodWeBinding(CID(1));
+        scope(exit) free(binding);
+        binding._profile_data = profile;
+        binding._quiet_limit = Duration.zero;
+
+        Element level;
+        assert(binding.add_handler(null, &level, profile.element_desc(0), 0).valid);
+        assert(!level.has_value && level.record_update() == SysTime());
+
+        AA55Request request;
+        request.control_code = GoodWeControlCode.read;
+        request.function_code = GoodWeFunctionCode.running_info;
+        ubyte[1] zero;
+        binding.response_handler(true, request, getTime(), zero[], null);
+        assert(level.has_value && level.record_value().asLong == 0);
     }
 }

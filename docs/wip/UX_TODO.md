@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-07: display newly bound scalar sensors as awaiting data
+
+Bindings can announce elements and their formats before the first sample.
+Show their values as pending until that sample, even when the device is online.
+Treat a reported zero as data and use its observation timestamp.
+
 ## 2026-10-20: reads answer with seq-tagged `val`s (sync protocol version 3)
 
 - `history_req` and `history` are gone, and `hello` no longer lists a `history` capability. A

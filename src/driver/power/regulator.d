@@ -240,7 +240,7 @@ nothrow @nogc:
         _subscribed = true;
 
         publish_controls();
-        publish_status();
+        publish_status(engine_status());
         _bound_device.notify(ComponentEvent.materialised);
 
         g_app.schedule(getTime() + telemetry_period, &telemetry);
@@ -346,7 +346,7 @@ private:
         if (!running)
             return;
 
-        publish_status();
+        publish_status(engine_status());
         g_app.schedule(now + telemetry_period, &telemetry);
         _scheduled = true;
     }
@@ -354,14 +354,14 @@ private:
     FireStatus engine_status() const
         => _engine ? fire_status(*cast(FireEngine*)_engine) : FireStatus();
 
-    void publish_status()
+    void publish_status(FireStatus status)
     {
-        FireStatus status = engine_status();
         auto timestamp = getSysTime();
         bool ok = !status.fault && status.period_q4 != 0;
         set_device_online(ok);
         _fault.value(status.fault, timestamp, &element_changed);
-        _frequency.value(Frequency(status.period_q4 ? 8_000_000.0f / status.period_q4 : 0), timestamp, &element_changed);
+        if (status.period_q4)
+            _frequency.value(Frequency(8_000_000.0f / status.period_q4), timestamp, &element_changed);
         _applied.value(status.level_q16 * (100.0f / 65536), timestamp, &element_changed);
     }
 
@@ -413,6 +413,26 @@ private:
     }
 }
 
+
+unittest
+{
+    PowerRegulator regulator = alloc!PowerRegulator(CID(1));
+    scope(exit) free(regulator);
+    Element frequency, fault, applied;
+    frequency.format = register_value_format!Frequency();
+    fault.format = register_value_format!bool();
+    applied.format = register_value_format!float();
+    regulator._frequency = &frequency;
+    regulator._fault = &fault;
+    regulator._applied = &applied;
+
+    FireStatus status;
+    regulator.publish_status(status);
+    assert(!frequency.has_value);
+    status.period_q4 = 160_000;
+    regulator.publish_status(status);
+    assert(frequency.has_value && frequency.record_value().asQuantity().value == 50);
+}
 
 class PowerRegulatorModule : Module
 {
