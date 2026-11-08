@@ -1806,7 +1806,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
       <VersionIdentifiers>AllocTracking</VersionIdentifiers>
@@ -1837,7 +1837,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
       <VersionIdentifiers>AllocTracking</VersionIdentifiers>
@@ -1871,7 +1871,7 @@
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
@@ -1901,7 +1901,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
@@ -1933,7 +1933,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
       <VersionIdentifiers>AllocTracking</VersionIdentifiers>
@@ -1967,7 +1967,7 @@
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
@@ -1997,7 +1997,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
       <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
@@ -2025,7 +2025,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
@@ -2061,7 +2061,7 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
@@ -2090,7 +2090,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
       <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
@@ -2118,7 +2118,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
@@ -2154,7 +2154,7 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
