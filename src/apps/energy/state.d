@@ -480,6 +480,15 @@ nothrow @nogc:
     }
 }
 
+private void publish_boundary_counter(ref FloatPublishCell cell, Port* port, bool importing, SysTime now)
+{
+    Element* counter = port_counter_element(port, importing);
+    float value = counter ? cast(float)read_energy_counter(counter, now) :
+                  importing ? port.meter_data.total_import_active[0] : port.meter_data.total_export_active[0];
+    if (value == value)
+        cell.publish(value);
+}
+
 private struct BoundaryPublishEntry
 {
 nothrow @nogc:
@@ -527,10 +536,11 @@ nothrow @nogc:
     {
         float pw_in = float.nan, pw_out = float.nan;
         bool have = p.meter_data.has(MeterField.power);
+        bool external = external_boundary(p);
         if (have)
         {
             float power = p.meter_data.active[0].value;
-            if (external_boundary(p))
+            if (external)
             {
                 pw_in = power > 0 ? power : 0;
                 pw_out = power < 0 ? -power : 0;
@@ -544,11 +554,11 @@ nothrow @nogc:
         power_in.publish(pw_in);
         power_out.publish(pw_out);
 
-        BoundaryEnergy e = boundary_energy(p);
-        if (e.into_total == e.into_total)
-            energy_in.publish(cast(float)e.into_total);
-        if (e.out_total == e.out_total)
-            energy_out.publish(cast(float)e.out_total);
+        if (p.meter)
+        {
+            publish_boundary_counter(energy_in, p, external, ts);
+            publish_boundary_counter(energy_out, p, !external, ts);
+        }
 
         Bus* b = boundary_bus(p);
         publish_string(circuit_e, last_circuit, b ? b.id[] : "", ts);
@@ -983,6 +993,7 @@ unittest
 {
     import urt.si.quantity : Quantity;
     import urt.si.unit : KilowattHour;
+    import urt.time : dur;
 
     Element reading;
     reading.format = register_value_format!float();
@@ -1046,7 +1057,11 @@ unittest
     auto builder = devices.create("boundary-publish");
     port.meter = builder.component("meter", "EnergyMeter");
     alias Energy = Quantity!(float, KilowattHour);
-    Element* counter = builder.element(port.meter, "export", register_value_format!Energy());
+    FormatId counter_format = register_value_format!Energy();
+    Element* counter = builder.element(port.meter, "export", counter_format);
+    Element* export1 = builder.element(port.meter, "export1", counter_format);
+    Element* export2 = builder.element(port.meter, "export2", counter_format);
+    Element* import1 = builder.element(port.meter, "import1", counter_format);
     BoundaryPublishEntry entry;
     entry.bind(builder, port);
     Islands islands;
@@ -1056,20 +1071,55 @@ unittest
     entry.publish(port, graph, islands, now);
     assert(!entry.energy_in.element.has_value && !entry.energy_out.element.has_value);
 
-    counter.value(Energy(12));
+    counter.sampling_mode = SamplingMode.poll;
+    counter.value(Energy(104), now);
     port.meter_data = get_meter_data(port.meter);
     port.meter_data.write_value(MeterField.power, 0, -100);
     port.meter_data.mark(MeterField.power, 0, Provenance.measured);
     entry.publish(port, graph, islands, now);
-    assert(entry.energy_in.element.value.asFloat == 12);
+    assert(entry.energy_in.element.value.asFloat == 104);
     assert(entry.power_in.element.value.asFloat == 100);
     SysTime counter_time = entry.energy_in.element.record_update;
 
-    counter.invalidate();
+    counter.last_update = now - dur!"seconds"(181);
+    export1.value(Energy(10));
+    export2.value(Energy(30));
+    import1.value(Energy(5));
     port.meter_data = get_meter_data(port.meter);
+    assert(port.meter_data.source(MeterField.total_export_active) == Provenance.synthesized);
+    assert(port.meter_data.total_export_active[0] == 40);
     entry.publish(port, graph, islands, now);
-    assert(entry.energy_in.element.value.asFloat == 12);
+    assert(entry.energy_in.element.value.asFloat == 104);
     assert(entry.energy_in.element.record_update == counter_time);
-    assert(!entry.energy_out.element.has_value);
+    assert(entry.energy_out.element.value.asFloat == 5);
     assert(!entry.power_in.element.has_value);
+
+    counter.value(Energy(107));
+    port.meter_data = get_meter_data(port.meter);
+    entry.publish(port, graph, islands, getSysTime());
+    assert(entry.energy_in.element.value.asFloat == 107);
+    assert(entry.energy_out.element.value.asFloat == 5);
+
+    port.meter = builder.component("single", "EnergyMeter");
+    port.meter_phase = 1;
+    builder.element(port.meter, "type", register_value_format!string()).value("single-phase");
+    Element* single_export = builder.element(port.meter, "export", counter_format);
+    single_export.value(Energy(120));
+    port.meter_data = get_port_meter_data(port.meter, port.meter_phase, port.meter_sign);
+    entry.publish(port, graph, islands, getSysTime());
+    assert(entry.energy_in.element.value.asFloat == 120);
+
+    Element* phase_export = builder.element(port.meter, "export1", counter_format);
+    phase_export.sampling_mode = SamplingMode.poll;
+    phase_export.value(Energy(130));
+    port.meter_data = get_port_meter_data(port.meter, port.meter_phase, port.meter_sign);
+    entry.publish(port, graph, islands, getSysTime());
+    assert(entry.energy_in.element.value.asFloat == 130);
+
+    phase_export.last_update = now - dur!"seconds"(181);
+    single_export.value(Energy(140));
+    port.meter_data = get_port_meter_data(port.meter, port.meter_phase, port.meter_sign);
+    assert(port.meter_data.total_export_active[0] == 140);
+    entry.publish(port, graph, islands, getSysTime());
+    assert(entry.energy_in.element.value.asFloat == 130);
 }
