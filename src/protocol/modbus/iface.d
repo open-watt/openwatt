@@ -721,7 +721,7 @@ private:
         static immutable ubyte[3] head = [ 1, modbus_frame_headroom, 3 ];
         static immutable ubyte[3] tail = [ 2, 0, 4 ];
         size_t pdu_length = packet.data.length;
-        Page* page = packet_page(packet, head[protocol], tail[protocol] + (protocol == ModbusProtocol.ascii ? pdu_length : 0));
+        Page* page = packet_page(packet, head[protocol], tail[protocol] + (protocol == ModbusProtocol.ascii ? pdu_length : 0), framing_site!__FUNCTION__);
         if (!page)
         {
             add_tx_drop();
