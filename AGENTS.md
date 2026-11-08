@@ -424,6 +424,10 @@ High-level application logic:
 
 ## Development Practices
 
+### PR Workstreams
+
+A PR that belongs to a series of related PRs carries a `Workstream: <name>` line in its description, using the same name across the series and across repositories. Reviewers use it to route related PRs to the same reviewer. A PR with no such line is treated as isolated.
+
 ### Debugging & Root Cause Analysis
 
 **Never apply speculative fixes.** When investigating a bug:
