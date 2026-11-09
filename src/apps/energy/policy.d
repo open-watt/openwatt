@@ -16,7 +16,7 @@ import apps.energy.appliance;
 import apps.energy.planner : AnalysisField;
 import apps.energy.state : PublishSlot;
 import apps.energy.control;
-import apps.energy.model : read_in_unit;
+import apps.energy.model : read_in_unit, reading_present;
 
 import manager;
 import manager.base;
@@ -74,6 +74,7 @@ nothrow @nogc:
     PublishSlot[PolicyField.max + 1] published;
     PublishSlot[DecisionField.max + 1] decision;
     PublishSlot[AnalysisField.max + 1] analysis;
+    bool witness_hold_warned;
 
     // publication is keyed by name; a rename drops the bound slots so they rebind under the new one
     void publish_as(const(char)[] name)
@@ -210,6 +211,16 @@ Element* witness_element(ref const Goal goal, const(Control)* ctl)
     }
 }
 
+bool witness_unknown(Policy p, const(Control)* ctl, SysTime now)
+{
+    const kind = p.parsed_goal.kind;
+    if (kind != GoalKind.soc && kind != GoalKind.temp)
+        return false;
+
+    Element* e = witness_element(p.parsed_goal, ctl);
+    return e && !reading_present(e, now);
+}
+
 // Goal arguments use display units, regardless of the witness's storage scale.
 float current_value(Policy p, const(Control)* ctl)
 {
@@ -305,11 +316,21 @@ void publish_policy(Device energy_device, Policy p, ControlRegistry registry)
     if (kind == GoalKind.soc || kind == GoalKind.temp)
         put(PolicyField.goal_value, p.parsed_goal.arg);
 
-    float cv = current_value(p, ctl);
-    if (cv == cv)
-        put(PolicyField.current_value, cv);
+    bool unknown = witness_unknown(p, ctl, now);
+    if (unknown)
+    {
+        if (Element* e = p.published[PolicyField.current_value].element)
+            if (e.has_value)
+                e.invalidate(now);
+    }
+    else
+    {
+        float cv = current_value(p, ctl);
+        if (cv == cv)
+            put(PolicyField.current_value, cv);
+    }
 
-    put(PolicyField.satisfied, satisfied(p, ctl));
+    put(PolicyField.satisfied, !unknown && satisfied(p, ctl));
 }
 
 
