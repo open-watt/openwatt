@@ -2,8 +2,9 @@ module apps.energy.battery_store;
 
 import urt.array;
 import urt.si.unit : ScaledUnit, AmpereHour, Percent;
+import urt.time : getSysTime, SysTime;
 
-import apps.energy.model : absf, read_in_unit;
+import apps.energy.model : absf, read_in_unit, reading_present;
 
 import manager.component;
 import manager.element;
@@ -67,21 +68,23 @@ float read_battery_soc(Component c)
     if (c is null)
         return float.nan;
 
-    float soc = read_num(c, "soc");
+    SysTime now = getSysTime();
+    float soc = read_store_telemetry(c, "soc", Percent, now);
     if (soc == soc || c.template_[] == "Battery")
         return soc;
 
     Component battery = c.find_first_component_by_template_recursive("Battery");
-    return read_num(battery, "soc");
+    return read_store_telemetry(battery, "soc", Percent, now);
 }
 
 void reconcile_battery_stores(ref Array!BatteryStoreContribution contributions, ref Array!BatteryStore stores)
 {
     stores.clear();
+    SysTime now = getSysTime();
     foreach (ref c; contributions[])
     {
         BatteryStore* s = find_or_add_store(stores, c.circuit);
-        BatteryStoreReading r = read_store(c.component);
+        BatteryStoreReading r = read_store(c.component, now);
         if (c.kind == BatteryStoreContributionKind.member)
         {
             ++s.member_count;
@@ -268,7 +271,7 @@ void finalise_store(ref BatteryStore s)
 {
     if (s.member_count != 0)
     {
-        finalise_member_totals(s.reading, s.members);
+        finalise_member_totals(s.reading, s.members, s.member_count);
         if (s.views.soc_count != 0 && s.reading.soc == s.reading.soc)
             s.soc_anomaly = absf(avg_soc(s.views) - s.reading.soc) > soc_tolerance;
     }
@@ -276,12 +279,14 @@ void finalise_store(ref BatteryStore s)
         finalise_view_totals(s.reading, s.views);
 }
 
-void finalise_member_totals(ref BatteryStoreReading reading, ref const ContributionTotals totals)
+void finalise_member_totals(ref BatteryStoreReading reading, ref const ContributionTotals totals, uint member_count)
 {
-    reading.soc = (totals.soc_weight > 0 && totals.soc_weight_count == totals.soc_count)
-        ? totals.soc_weighted / totals.soc_weight
-        : totals.soc_count ? totals.soc_plain / totals.soc_count : float.nan;
-    reading.remain_capacity = sum_or_nan(totals.remain_sum, totals.remain_count);
+    if (totals.soc_count == member_count)
+        reading.soc = (totals.soc_weight > 0 && totals.soc_weight_count == member_count)
+            ? totals.soc_weighted / totals.soc_weight
+            : totals.soc_plain / member_count;
+    if (totals.remain_count == member_count)
+        reading.remain_capacity = totals.remain_sum;
     reading.full_capacity = sum_or_nan(totals.full_sum, totals.full_count);
 }
 
@@ -292,28 +297,22 @@ void finalise_view_totals(ref BatteryStoreReading reading, ref const Contributio
     reading.full_capacity = avg(totals.full_sum, totals.full_count);
 }
 
-BatteryStoreReading read_store(Component c)
+BatteryStoreReading read_store(Component c, SysTime now)
 {
     BatteryStoreReading r;
-    r.soc = read_num(c, "soc");
-    r.remain_capacity = read_scaled(c, "remain_capacity", AmpereHour);
-    r.full_capacity = read_scaled(c, "full_capacity", AmpereHour);
+    if (c)
+    {
+        r.soc = read_store_telemetry(c, "soc", Percent, now);
+        r.remain_capacity = read_store_telemetry(c, "remain_capacity", AmpereHour, now);
+        r.full_capacity = read_in_unit(c.find_element("full_capacity"), AmpereHour);
+    }
     return r;
 }
 
-// Percent is scaled despite being dimensionless.
-float read_num(Component c, const(char)[] id)
+float read_store_telemetry(Component c, const(char)[] id, ScaledUnit unit, SysTime now)
 {
-    if (c is null)
-        return float.nan;
-    return read_in_unit(c.find_element(id), Percent);
-}
-
-float read_scaled(Component c, const(char)[] id, ScaledUnit unit)
-{
-    if (c is null)
-        return float.nan;
-    return read_in_unit(c.find_element(id), unit);
+    Element* e = c ? c.find_element(id) : null;
+    return reading_present(e, now) ? read_in_unit(e, unit) : float.nan;
 }
 
 float avg_soc(ref const ContributionTotals totals) pure
@@ -329,4 +328,59 @@ float avg(float sum, uint count) pure
 float sum_or_nan(float sum, uint count) pure
 {
     return count ? sum : float.nan;
+}
+
+
+unittest
+{
+    import urt.si.quantity : Quantity;
+    import urt.time : dur;
+    import manager.device : DeviceTable;
+
+    DeviceTable devices;
+    auto builder = devices.create("battery-freshness");
+    Component battery = builder.component("battery", "Battery");
+    alias Soc = Quantity!(float, Percent);
+    alias Capacity = Quantity!(float, AmpereHour);
+    Element* soc = builder.element(battery, "soc", register_value_format!Soc());
+    Element* remain = builder.element(battery, "remain_capacity", register_value_format!Capacity());
+    Element* full = builder.element(battery, "full_capacity", register_value_format!Capacity());
+    SysTime now = getSysTime();
+    soc.sampling_mode = SamplingMode.poll;
+    remain.sampling_mode = SamplingMode.poll;
+    full.sampling_mode = SamplingMode.poll;
+    soc.value(Soc(50), now);
+    remain.value(Capacity(50), now);
+    full.value(Capacity(100), now);
+    BatteryStoreReading reading = read_store(battery, now);
+    assert(reading.soc == 50 && reading.remain_capacity == 50 && reading.full_capacity == 100);
+
+    reading = read_store(battery, now + dur!"seconds"(181));
+    assert(reading.soc != reading.soc && reading.remain_capacity != reading.remain_capacity);
+    assert(reading.full_capacity == 100);
+
+    Component other = builder.component("other", "Battery");
+    builder.element(other, "soc", register_value_format!Soc()).value(Soc(25), now);
+    builder.element(other, "remain_capacity", register_value_format!Capacity()).value(Capacity(25), now);
+    builder.element(other, "full_capacity", register_value_format!Capacity()).value(Capacity(100), now);
+    Array!BatteryStoreContribution contributions;
+    foreach (pack; [battery, other])
+    {
+        BatteryStoreContribution contribution;
+        contribution.circuit = "dc";
+        contribution.kind = BatteryStoreContributionKind.member;
+        contribution.component = pack;
+        contributions ~= contribution;
+    }
+    Array!BatteryStore stores;
+    reconcile_battery_stores(contributions, stores);
+    assert(stores.length == 1 && stores[0].member_count == 2);
+    assert(stores[0].reading.soc == 37.5f && stores[0].reading.remain_capacity == 75);
+    assert(stores[0].reading.full_capacity == 200);
+
+    soc.last_update = remain.last_update = now - dur!"seconds"(181);
+    reconcile_battery_stores(contributions, stores);
+    reading = stores[0].reading;
+    assert(reading.soc != reading.soc && reading.remain_capacity != reading.remain_capacity);
+    assert(reading.full_capacity == 200);
 }

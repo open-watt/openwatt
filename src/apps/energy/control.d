@@ -89,6 +89,8 @@ nothrow @nogc:
     MonoTime last_transition;
     MonoTime last_on;
     float current_setpoint = float.nan;
+    CID command_policy;
+    bool setpoint_written;
 
     ControlKind kind() const
     {
@@ -176,6 +178,14 @@ nothrow @nogc:
         return null;
     }
 
+    void settle_dispatch(Control* control)
+    {
+        if (!control.setpoint_written)
+            return;
+        clear_alias_commands(by_owner, control);
+        clear_alias_commands(by_target, control);
+    }
+
     // TODO: replace the per-tick scan with appliance and component-tree dirtiness.
     void resync_all(ref TopologyGraph graph)
     {
@@ -195,9 +205,7 @@ nothrow @nogc:
 
             if (Control* existing = a.id in by_owner)
             {
-                synth.last_transition = existing.last_transition;
-                synth.last_on = existing.last_on;
-                synth.current_setpoint = existing.current_setpoint;
+                inherit_command(synth, *existing);
             }
 
             by_owner.replace(a.id, synth.move);
@@ -230,27 +238,38 @@ nothrow @nogc:
         }
         foreach (key; to_remove)
         {
-            // Preserve allocator ownership so a departed car's actuator is released.
-            if (Control* dying = key in by_target)
-            {
-                if (dying.current_setpoint == dying.current_setpoint && dying.partner !is null)
-                {
-                    if (Control* actuator = dying.partner.get.id in by_owner)
-                    {
-                        if (actuator.current_setpoint != actuator.current_setpoint)
-                        {
-                            actuator.current_setpoint = dying.current_setpoint;
-                            actuator.last_transition = dying.last_transition;
-                            actuator.last_on = dying.last_on;
-                        }
-                    }
-                }
-            }
+            if (Control* departing = key in by_target)
+                handoff_departing_control(*departing);
             by_target.remove(key);
         }
     }
 
 private:
+    static void clear_alias_commands(ref Map!(CID, Control) controls, Control* control)
+    {
+        foreach (ref alias_control; controls.values)
+        {
+            if (&alias_control is control || alias_control.setpoint_e !is control.setpoint_e)
+                continue;
+            alias_control.current_setpoint = float.nan;
+            alias_control.command_policy = CID.init;
+        }
+    }
+
+    // Leave the old actuator visible to the allocator's release pass.
+    void handoff_departing_control(ref const Control departing)
+    {
+        const(Appliance) partner = departing.partner.get;
+        if (!partner || departing.current_setpoint != departing.current_setpoint)
+            return;
+        if (Control* actuator = partner.id in by_owner)
+        {
+            if (actuator.source is departing.source && actuator.setpoint_e is departing.setpoint_e &&
+                actuator.current_setpoint != actuator.current_setpoint)
+                inherit_command(*actuator, departing);
+        }
+    }
+
     void synthesize_graph_controls(ref TopologyGraph graph, ref Array!CID survivors)
     {
         foreach (link; graph.links[])
@@ -281,6 +300,8 @@ private:
                     continue;
 
                 Control synth = *actuator;
+                synth.current_setpoint = float.nan;
+                synth.command_policy = CID.init;
                 synth.owner = target;
                 synth.partner = link.owner;
                 synth.state_e = null;
@@ -304,8 +325,11 @@ private:
 
                 if (Control* existing = target.id in by_target)
                 {
-                    synth.last_transition = existing.last_transition;
-                    synth.current_setpoint = existing.current_setpoint;
+                    if (existing.partner.get is link.owner && existing.source is synth.source &&
+                        existing.setpoint_e is synth.setpoint_e && existing.enable_e is synth.enable_e)
+                        inherit_command(synth, *existing);
+                    else
+                        handoff_departing_control(*existing);
                 }
 
                 by_target.replace(target.id, synth.move);
@@ -429,6 +453,14 @@ private:
 
 private:
 
+void inherit_command(ref Control control, ref const Control previous) pure
+{
+    control.last_transition = previous.last_transition;
+    control.last_on = previous.last_on;
+    control.current_setpoint = previous.current_setpoint;
+    control.command_policy = previous.command_policy;
+}
+
 bool is_switch(const Component c)
     => c.template_[] == "Switch" || c.template_[] == "Light";
 
@@ -453,4 +485,197 @@ Duration read_duration(const(Element)* e)
         return Duration.zero;
     // Bare duration constants are already seconds; typed values normalise to them.
     return seconds(cast(long)e.normalised_value());
+}
+
+
+unittest
+{
+    import urt.mem : alloc, free;
+    import urt.si.quantity : Quantity, Watts;
+    import urt.si.unit : Percent;
+
+    import apps.energy.allocator : DecisionField, run_allocator;
+    import apps.energy.planner : Planner;
+    import apps.energy.policy : Policy, PolicyTier;
+
+    auto appliances = Collection!Appliance();
+    Appliance a = appliances.alloc("handoff-a");
+    Appliance b = appliances.alloc("handoff-b");
+    Appliance car = appliances.alloc("handoff-car");
+    appliances.add(a);
+    appliances.add(b);
+    appliances.add(car);
+    scope(exit)
+        foreach (appliance; [a, b, car])
+        {
+            appliances.remove(appliance);
+            free(appliance);
+        }
+
+    DeviceTable devices;
+    alias Soc = Quantity!(float, Percent);
+    Element* create_evse(Appliance owner)
+    {
+        auto builder = devices.create(owner.name[]);
+        Component pc = builder.component("control", "PowerControl");
+        builder.element(pc, "unit", register_value_format!string()).value("W");
+        builder.element(pc, "max", register_value_format!Watts()).value(Watts(1000));
+        Element* soc = builder.element("soc", register_value_format!Soc());
+        soc.sampling_mode = SamplingMode.poll;
+        soc.value(Soc(20));
+        Element* setpoint = builder.element(pc, "setpoint", register_value_format!Watts());
+        builder.commit();
+        owner.vin = owner.name[];
+        assert(owner.resolve_refs(devices));
+        return setpoint;
+    }
+
+    Element* setpoint_a = create_evse(a);
+    Element* setpoint_b = create_evse(b);
+    car.kind = "car";
+    auto builder = devices.create(car.name[]);
+    Device car_device = builder.device;
+    Element* soc = builder.element("soc", register_value_format!Soc());
+    soc.sampling_mode = SamplingMode.poll;
+    soc.value(Soc(90));
+    builder.commit();
+    car.vin = car.name[];
+    assert(car.resolve_refs(devices));
+
+    auto policies = Collection!Policy();
+    Policy add_policy(const(char)[] name, Appliance target, PolicyTier tier, const(char)[] goal)
+    {
+        Policy policy = policies.alloc(name);
+        policies.add(policy);
+        assert(policy.target(target.name[]) is null);
+        policy.tier = tier;
+        assert(policy.goal(goal) is null);
+        policies.update_all();
+        assert(policy.running);
+        return policy;
+    }
+    Policy floor = add_policy("handoff-floor", car, PolicyTier.floor, "soc(80)");
+    Policy direct = add_policy("handoff-direct", a, PolicyTier.floor, "soc(80)");
+    scope(exit)
+    {
+        direct.destroy();
+        floor.destroy();
+        policies.update_all();
+    }
+
+    auto registry = alloc!ControlRegistry();
+    scope(exit) free(registry);
+    TopologyGraph graph;
+    scope(exit) graph.clear();
+
+    void connect(Appliance evse)
+    {
+        graph.clear();
+        Bus* supply = graph.ensure_bus("supply");
+        Bus* outlet = graph.ensure_bus("outlet");
+        Port* delivery = graph.add_port(evse, outlet, PortRole.car, FlowDomain.supply, null, 0);
+        graph.add_port(car, outlet, PortRole.connection, FlowDomain.consume, null, 0);
+        graph.add_link(evse, supply, outlet, null, delivery, 0);
+        registry.resync_all(graph);
+    }
+
+    registry.resync_all(graph);
+    Islands islands;
+    Planner planner;
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(setpoint_a.normalised_value() == 1000);
+    Control* direct_control = registry.lookup(a);
+    assert(direct_control.command_policy == direct.id && direct_control.current_setpoint == 1000);
+
+    connect(a);
+    Control* control = registry.lookup(car);
+    direct_control = registry.lookup(a);
+    assert(control && control.setpoint_e is setpoint_a);
+    assert(control.command_policy == CID.init && control.current_setpoint != control.current_setpoint);
+    assert(control.last_transition == direct_control.last_transition && control.last_on == direct_control.last_on);
+    assert(direct_control.command_policy == direct.id && direct_control.current_setpoint == 1000);
+
+    Element* direct_soc = a.device_ref.find_element("soc");
+    direct_soc.value(Soc(90));
+    soc.value(Soc(20));
+    Element* max_a = a.device_ref.find_element("control.max");
+    max_a.value(Watts(2000));
+    SysTime authority_time = getSysTime() + dur!"minutes"(1);
+    setpoint_a.value(Watts(1000), authority_time);
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(setpoint_a.normalised_value() == 2000 && setpoint_a.last_update == authority_time);
+    assert(control.command_policy == floor.id && control.current_setpoint == 2000);
+    assert(direct_control.command_policy == CID.init && direct_control.current_setpoint != direct_control.current_setpoint);
+
+    direct_soc.value(Soc(20));
+    soc.value(Soc(90));
+    max_a.value(Watts(1500));
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(setpoint_a.normalised_value() == 1500);
+    assert(direct_control.command_policy == direct.id && direct_control.current_setpoint == 1500);
+    assert(control.command_policy == CID.init && control.current_setpoint != control.current_setpoint);
+
+    direct_soc.value(Soc(90));
+    soc.value(Soc(20));
+    max_a.value(Watts(2000));
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(control.command_policy == floor.id && control.current_setpoint == 2000);
+    assert(direct_control.command_policy == CID.init && direct_control.current_setpoint != direct_control.current_setpoint);
+
+    direct_soc.last_update = getSysTime() - dur!"seconds"(181);
+    soc.last_update = direct_soc.last_update;
+    connect(a);
+    control = registry.lookup(car);
+    SysTime command_time = setpoint_a.record_update;
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(direct.decision[DecisionField.reason].element.text_value() == "state unknown");
+    assert(floor.decision[DecisionField.reason].element.text_value() == "hold: state unknown");
+    assert(control.command_policy == floor.id && control.current_setpoint == 2000);
+    assert(setpoint_a.record_update == command_time);
+
+    connect(b);
+    control = registry.lookup(car);
+    assert(control.setpoint_e is setpoint_b && control.command_policy == CID.init);
+    assert(control.current_setpoint != control.current_setpoint && !setpoint_b.has_value);
+    Control* old_actuator = registry.lookup(a);
+    assert(old_actuator.command_policy == floor.id && old_actuator.current_setpoint == 2000);
+
+    setpoint_b.value(Watts(2000));
+    Policy off = add_policy("handoff-off", car, PolicyTier.important, "off");
+    scope(exit)
+    {
+        off.destroy();
+        policies.update_all();
+    }
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(floor.decision[DecisionField.reason].element.text_value() == "state unknown");
+    assert(off.decision[DecisionField.reason].element.text_value() == "off");
+    assert(setpoint_a.normalised_value() == 0 && setpoint_b.normalised_value() == 0);
+    assert(old_actuator.command_policy == CID.init && old_actuator.current_setpoint != old_actuator.current_setpoint);
+
+    auto evse_builder = (cast(Device)b.device_ref).edit();
+    Element* evse_enable = evse_builder.element("control.enable", register_value_format!bool());
+    evse_enable.value(false);
+    evse_builder.commit();
+    auto vehicle_builder = car_device.edit();
+    Element* vehicle_enable = vehicle_builder.element("charging", register_value_format!bool());
+    vehicle_enable.value(false);
+    vehicle_builder.commit();
+
+    connect(b);
+    assert(direct.target(b.name[]) is null);
+    assert(direct.goal("on") is null);
+    policies.update_all();
+    run_allocator(car_device, registry, planner, islands, graph);
+    direct_control = registry.lookup(b);
+    assert(direct_control.command_policy == direct.id && direct_control.current_setpoint == 1000);
+    assert(evse_enable.value.asBool && !vehicle_enable.value.asBool);
+
+    vehicle_enable.value(true);
+    command_time = setpoint_b.last_update;
+    run_allocator(car_device, registry, planner, islands, graph);
+    assert(off.decision[DecisionField.reason].element.text_value() == "off");
+    assert(evse_enable.value.asBool && !vehicle_enable.value.asBool);
+    assert(setpoint_b.normalised_value() == 1000 && setpoint_b.last_update == command_time);
+    assert(direct_control.command_policy == direct.id && direct_control.current_setpoint == 1000);
 }

@@ -330,13 +330,29 @@ float link_current_amps(Link* link) pure
     return float.nan;
 }
 
-float link_headroom_amps(Link* link) pure
+bool link_has_current_meter(Link* link)
+{
+    return (!link.port_a_is_hub && declares_current_meter(link.port_a)) ||
+           declares_current_meter(link.port_b);
+}
+
+private bool declares_current_meter(Port* port)
+{
+    if (!port || !port.meter)
+        return false;
+    static immutable string[] fields = ["current", "current1", "current2", "current3",
+                                         "power", "power1", "power2", "power3"];
+    foreach (field; fields)
+        if (port.meter.find_element(field))
+            return true;
+    return false;
+}
+
+float link_headroom_amps(Link* link, out float current) pure
 {
     if (link is null || link.capacity_amps == 0)
         return float.nan;
-    float current = link_current_amps(link);
-    if (current != current)
-        return float.nan;
+    current = link_current_amps(link);
     return link.capacity_amps - current;
 }
 
@@ -1003,14 +1019,15 @@ private:
 
     void update_path_limit(ref ControlPath path, Link* link) pure
     {
-        float headroom = link_headroom_amps(link);
+        float current;
+        float headroom = link_headroom_amps(link, current);
         if (headroom != headroom)
             return;
         if (path.limiting_link is null || headroom < path.headroom_amps)
         {
             path.limiting_link = link;
             path.headroom_amps = headroom;
-            path.limiting_current_amps = link_current_amps(link);
+            path.limiting_current_amps = current;
             path.limiting_capacity_amps = link.capacity_amps;
         }
     }
