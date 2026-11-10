@@ -103,7 +103,10 @@ nothrow @nogc:
 
     void arm()
     {
-        _next = kind == TimeKind.duration ? getSysTime() + schedule : next_wallclock();
+        if (kind == TimeKind.duration)
+            _next = getSysTime() + schedule;
+        else
+            advance_wallclock(getSysTime());
 
         _done = false;
         schedule_fire(getTime());
@@ -134,6 +137,7 @@ nothrow @nogc:
 
 private:
     SysTime _next;
+    Duration _offset;
     bool _fire_scheduled;
     bool _wc_subscribed;
     bool _done;
@@ -179,7 +183,7 @@ private:
             case TimeKind.tod:
                 one_shot = !repeat;
                 if (!one_shot)
-                    _next = next_wallclock();
+                    advance_wallclock(getSysTime());
                 break;
         }
 
@@ -198,17 +202,36 @@ private:
             g_app.cancel(&on_fire);
             _fire_scheduled = false;
         }
-        _next = next_wallclock();
+        retime(getSysTime());
         schedule_fire(getTime());
     }
 
-    SysTime next_wallclock()
+    void advance_wallclock(SysTime now)
     {
+        _offset = local_offset(now);
         if (kind == TimeKind.absolute)
-            return when_has_tz ? get_sys_time(when) : cast(SysTime)get_local_time(when);
-        return next_local_occurrence(getSysTime(), at, days_mask);
+            _next = when_has_tz ? get_sys_time(when) : cast(SysTime)get_local_time(when);
+        else
+            _next = next_local_occurrence(now, at, days_mask);
+    }
+
+    // a timezone change keeps the pending occurrence's wall time, so an occurrence the
+    // change jumps over fires late rather than being lost; a UTC step recomputes from now
+    void retime(SysTime now)
+    {
+        Duration offset = local_offset(now);
+        if (kind == TimeKind.tod && offset != _offset)
+        {
+            _next = _next + (_offset - offset);
+            _offset = offset;
+        }
+        else
+            advance_wallclock(now);
     }
 }
+
+Duration local_offset(SysTime now)
+    => SysTime((cast(LocalTime)now).ticks) - now;
 
 SysTime next_local_occurrence(SysTime now, TimeOfDay at, ubyte days_mask)
 {
@@ -305,4 +328,55 @@ unittest
     uri.body = "2026-06-16T00:00:00Z";
     assert(parse_time(uri, spec));
     assert(spec.when_has_tz && get_sys_time(spec.when) == get_sys_time(dt) + dur!"hours"(16) + dur!"minutes"(30));
+
+    TimeSub s = alloc!TimeSub();
+    scope(exit) free(s);
+    s.kind = TimeKind.tod;
+    DateTime day = { year: 2026, month: Month.March, day: 29 };
+
+    // spring forward, UTC+1 -> +2 at 01:00 UTC, seen by the poll at 01:00:30
+    set_timezone(dur!"hours"(1));
+    s.at = TimeOfDay(3, 0, 0, 0);
+    s.advance_wallclock(get_sys_time(day));
+    assert(s._next == get_sys_time(day) + dur!"hours"(2));
+    set_timezone(dur!"hours"(2));
+    SysTime seen = get_sys_time(day) + dur!"hours"(1) + dur!"seconds"(30);
+    s.retime(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(1));
+    s.advance_wallclock(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(25));
+
+    // the 02:30 the jump skips fires at the first moment after the gap
+    set_timezone(dur!"hours"(1));
+    s.at = TimeOfDay(2, 30, 0, 0);
+    s.advance_wallclock(get_sys_time(day));
+    set_timezone(dur!"hours"(2));
+    s.retime(seen);
+    assert(s._next <= seen);
+    s.advance_wallclock(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(24) + dur!"minutes"(30));
+
+    // fall back, UTC+2 -> +1 at 01:00 UTC; the repeated 02:30 fires once
+    set_timezone(dur!"hours"(2));
+    s.advance_wallclock(get_sys_time(day));
+    assert(s._next == get_sys_time(day) + dur!"minutes"(30));
+    s.advance_wallclock(s._next);
+    set_timezone(dur!"hours"(1));
+    s.retime(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(25) + dur!"minutes"(30));
+
+    // an unchanged offset (a UTC step) recomputes from now
+    s.retime(get_sys_time(day) + dur!"hours"(30));
+    assert(s._next == get_sys_time(day) + dur!"hours"(49) + dur!"minutes"(30));
+
+    // zone-less when: in the gap also fires as soon as the change is seen
+    set_timezone(dur!"hours"(1));
+    s.kind = TimeKind.absolute;
+    s.when = day;
+    s.when.hour = 2;
+    s.when.minute = 30;
+    s.advance_wallclock(get_sys_time(day));
+    set_timezone(dur!"hours"(2));
+    s.retime(seen);
+    assert(s._next <= seen);
 }
