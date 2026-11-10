@@ -85,6 +85,7 @@ left in place they are dead weight whose reason is invisible in the code.
 - Verify the width-aware uRT endian paths on RP2350 hardware using the DHCPv6 IA_PREFIX
   reproducer before retiring the global strict-alignment proposal in uRT #306. Optimized
   Cortex-M33 IR/assembly and host suites pass; the target test image has only been built.
+- Reject out-of-range offsets in uRT LittleFS seek instead of narrowing them to signed 32 bits.
 - Before deploying the LittleFS-default uRT update to existing SPIFFS devices, back up persistent
   files, explicitly format LittleFS, restore configuration/identity or re-adopt, and verify
   persistence after reboot. Mount failure does not auto-format; re-adoption alone is insufficient.
@@ -1640,9 +1641,9 @@ this is what remains.
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
   bindings that abort or deref on data an attacker controls, and these survive. MQTT's
   `desc_by_index(mqtt.desc)` (`src/protocol/mqtt/binding.d:216`) has no `desc == ushort.max`
-  check. `ows.load` still reads `first_index`/`last_index`/`stride` off disk unvalidated
-  (`src/manager/ows.d:59`), so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
+  check. OWS block headers are validated, but persisted dynamic-record offsets and u15
+  heap lengths still need payload validation before `series.heap_view` exposes their bytes.
+  External state rejects, it does not assert.
 
 - **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
   `N` compiles unvalidated while the span comes from the register map
