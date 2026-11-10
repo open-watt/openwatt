@@ -101,10 +101,15 @@ final class Automation : ActiveObject
         set_time(tconcat("at:", value));
         mark_set!(typeof(this), [ "at", "on" ])();
     }
-    void when(SysTime value)
+    const(char)[] when(const(char)[] value)
     {
+        DateTime dt;
+        bool has_tz;
+        if (dt.from_string(value, has_tz) != value.length)
+            return tconcat("bad date/time: ", value);
         set_time(tconcat("when:", value));
         mark_set!(typeof(this), [ "when", "on" ])();
+        return null;
     }
 
     const(char)[] condition() const { return _condition[]; }
