@@ -1565,9 +1565,6 @@ this is what remains.
   `poll_rx()`; each wants an event where its platform offers one (a reactor `watch_io` for stdin
   on Linux, the IDF drivers' callbacks).
 
-- **`BridgeStream.write` spins on a member that is not running**: it loops until each member has
-  taken all the data, and a stopped member takes nothing.
-
 - **Push-receive review follow-ups** (2026-10-06, #814):
   - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
     reads again; epoll drops read interest and IOCP holds the one receive it has.
@@ -1672,14 +1669,6 @@ this is what remains.
   calls `Element.value` without checking `Access.write`, allowing CLI writes to reported
   read-only identities such as a port's `circuit`. Define whether this command is an explicit
   diagnostic override or should enforce the same write contract as clients (found in #718).
-
-- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
-  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
-  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
-  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
-  and its call sites on `has_ip`.
-
-- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **Finish the remaining fixes from PR #833 after a second review**: the trivial subset
   is split out. The subscriber tombstones lose a resubscribe when all eight slots are occupied;
