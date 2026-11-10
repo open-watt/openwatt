@@ -796,15 +796,17 @@ private:
 
 inout(T) dyn_cast(T)(inout(BaseObject) object) nothrow @nogc
     if (is(T : BaseObject) && !is(T == BaseObject))
+    => is_kind_of(object, dyn_type_info!T()) ? cast(inout(T))cast(inout(void)*)object : null;
+
+pragma(inline, false)
+bool is_kind_of(const(BaseObject) object, const(DynTypeInfo)* target) pure nothrow @nogc
 {
     if (object is null)
-        return null;
-
-    const(DynTypeInfo)* target = dyn_type_info!T();
+        return false;
     for (const(DynTypeInfo)* type_info = &object._typeInfo.dyn_type; type_info; type_info = type_info.parent)
         if (type_info is target)
-            return cast(inout(T))cast(inout(void)*)object;
-    return null;
+            return true;
+    return false;
 }
 
 class ActiveObject : BaseObject
@@ -1286,7 +1288,7 @@ nothrow @nogc:
         _id = object ? object.id : CID();
     }
 
-    inout(Type) get() inout
+    inout(Type) get() inout pure
         => cast(inout(Type))dyn_cast!Type(get_item(_id));
 
     String name() const pure
