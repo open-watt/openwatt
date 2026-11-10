@@ -36,7 +36,7 @@ struct DailySnapshot
 nothrow @nogc:
     Map!(Element*, DailyCounter) values;
     Array!IslandAccountPublisher account_publishers;
-    SysTime day_start;
+    DateTime today;
 }
 
 void update_accounts(Device energy_device, ref Islands islands, ref TopologyGraph graph, ref DailySnapshot daily)
@@ -63,13 +63,11 @@ private:
 
 void check_day_rollover(ref DailySnapshot daily, SysTime now)
 {
-    TimeOfDay tod = time_of_day(now);
-    Duration since_midnight = tod - TimeOfDay(0, 0, 0, 0);
-    SysTime today_midnight = now - since_midnight;
-    if (daily.day_start < today_midnight)
+    DateTime today = get_date_time(cast(LocalTime)now);
+    if (today.day != daily.today.day || today.month != daily.today.month || today.year != daily.today.year)
     {
         daily.values.clear();
-        daily.day_start = today_midnight;
+        daily.today = today;
     }
 }
 
@@ -906,4 +904,29 @@ unittest
     update_islands(islands, graph);
     assert(islands.length == 1);
     assert(compute_island_totals(islands[0], graph, daily).solar_today_kwh == 9);
+}
+
+unittest
+{
+    set_timezone(dur!"hours"(10));
+    scope(exit) set_timezone(Duration.zero);
+
+    Element e;
+    DailySnapshot daily;
+    DateTime dt = { year: 2026, month: Month.June, day: 15, hour: 13, minute: 59 };
+    check_day_rollover(daily, get_sys_time(dt));
+    today_delta_value(daily, &e, 10);
+    assert(today_delta_value(daily, &e, 12) == 2);
+
+    check_day_rollover(daily, get_sys_time(dt) + dur!"minutes"(2));
+    assert(today_delta_value(daily, &e, 15) == 0);
+
+    dt.hour = 23;
+    check_day_rollover(daily, get_sys_time(dt));
+    check_day_rollover(daily, get_sys_time(dt) + dur!"minutes"(2));
+    assert(today_delta_value(daily, &e, 17) == 2);
+
+    set_timezone(dur!"hours"(11));
+    check_day_rollover(daily, get_sys_time(dt) + dur!"minutes"(2));
+    assert(today_delta_value(daily, &e, 18) == 3);
 }

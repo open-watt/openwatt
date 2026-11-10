@@ -59,6 +59,7 @@ nothrow @nogc:
         s.schedule = spec.schedule;
         s.at = spec.at;
         s.when = spec.when;
+        s.when_has_tz = spec.when_has_tz;
         s.days_mask = spec.days_mask;
         s.repeat = spec.repeat;
 
@@ -92,7 +93,8 @@ nothrow @nogc:
     TimeKind kind;
     Duration schedule;
     TimeOfDay at;
-    SysTime when;
+    DateTime when;
+    bool when_has_tz;
     ubyte days_mask = 0x7F;
     bool repeat = true;
 
@@ -101,13 +103,7 @@ nothrow @nogc:
 
     void arm()
     {
-        SysTime now = getSysTime();
-        final switch (kind)
-        {
-            case TimeKind.duration: _next = now + schedule; break;
-            case TimeKind.tod:      _next = next_occurrence(now, at, days_mask); break;
-            case TimeKind.absolute: _next = when; break;
-        }
+        _next = kind == TimeKind.duration ? getSysTime() + schedule : next_wallclock();
 
         _done = false;
         schedule_fire(getTime());
@@ -183,7 +179,7 @@ private:
             case TimeKind.tod:
                 one_shot = !repeat;
                 if (!one_shot)
-                    _next = next_occurrence(getSysTime(), at, days_mask);
+                    _next = next_wallclock();
                 break;
         }
 
@@ -202,10 +198,22 @@ private:
             g_app.cancel(&on_fire);
             _fire_scheduled = false;
         }
-        if (kind == TimeKind.tod)
-            _next = next_occurrence(getSysTime(), at, days_mask);
+        _next = next_wallclock();
         schedule_fire(getTime());
     }
+
+    SysTime next_wallclock()
+    {
+        if (kind == TimeKind.absolute)
+            return when_has_tz ? get_sys_time(when) : cast(SysTime)get_local_time(when);
+        return next_local_occurrence(getSysTime(), at, days_mask);
+    }
+}
+
+SysTime next_local_occurrence(SysTime now, TimeOfDay at, ubyte days_mask)
+{
+    SysTime wall = next_occurrence(SysTime((cast(LocalTime)now).ticks), at, days_mask);
+    return cast(SysTime)LocalTime(wall.ticks);
 }
 
 struct TimeSpec
@@ -213,7 +221,8 @@ struct TimeSpec
     TimeKind kind;
     Duration schedule;
     TimeOfDay at;
-    SysTime when;
+    DateTime when;
+    bool when_has_tz;
     ubyte days_mask = 0x7F;
     bool repeat = true;
 }
@@ -237,7 +246,7 @@ StringResult parse_time(ref const SignalUri uri, out TimeSpec spec)
                 spec.days_mask = parse_days(d);
             break;
         case "when":
-            if (spec.when.fromString(uri.body) != cast(ptrdiff_t)uri.body.length)
+            if (spec.when.from_string(uri.body, spec.when_has_tz) != cast(ptrdiff_t)uri.body.length)
                 return StringResult(tconcat("bad date/time: ", uri.body));
             spec.kind = TimeKind.absolute;
             break;
@@ -273,4 +282,27 @@ ubyte parse_days(const(char)[] s)
         }
     }
     return mask ? mask : 0x7F;
+}
+
+unittest
+{
+    set_timezone(dur!"hours"(10));
+    scope(exit) set_timezone(Duration.zero);
+
+    DateTime dt = { year: 2026, month: Month.June, day: 15, hour: 7, minute: 30 };
+    SysTime now = get_sys_time(dt);
+    DateTime next = get_date_time(next_local_occurrence(now, TimeOfDay(18, 0, 0, 0), 0x7F));
+    assert(next.day == 15 && next.hour == 8 && next.minute == 0);
+    next = get_date_time(next_local_occurrence(now, TimeOfDay(17, 0, 0, 0), 0x7F));
+    assert(next.day == 16 && next.hour == 7);
+    next = get_date_time(next_local_occurrence(now, TimeOfDay(18, 0, 0, 0), 1 << Weekday.wed));
+    assert(next.day == 17 && next.hour == 8);
+
+    TimeSpec spec;
+    SignalUri uri = SignalUri("when", "2026-06-16T00:00:00");
+    assert(parse_time(uri, spec));
+    assert(!spec.when_has_tz && cast(SysTime)get_local_time(spec.when) == get_sys_time(dt) + dur!"hours"(6) + dur!"minutes"(30));
+    uri.body = "2026-06-16T00:00:00Z";
+    assert(parse_time(uri, spec));
+    assert(spec.when_has_tz && get_sys_time(spec.when) == get_sys_time(dt) + dur!"hours"(16) + dur!"minutes"(30));
 }
