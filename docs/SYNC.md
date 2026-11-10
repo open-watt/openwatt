@@ -43,7 +43,9 @@ closes. Every discovery domain owns a dynamic, temporary UDP server as its exclu
 listens on the domain's `sync-port` (default 4827) at its addresses and interfaces only while this
 node is an authority; announcements keep their own socket on the discovery port (4826) and carry
 the sync port while the listener is open, so a member dials the beacon's address on the port it
-announced, and a beacon without one is not dialable. A refused session hears nothing, and the
+announced, and a beacon without one is not dialable. An authority beaconing no sync port is
+logged once per link: it runs firmware from before sync moved onto RDP, which neither dials nor
+answers an RDP session, or its listener does not serve that link. A refused session hears nothing, and the
 opener's handshake backoff paces its retries. Spawned peers are
 `dynamic` instances of `/sync/peer`, named after the remote node once its `hello` identifies it.
 Builds without RDP (`RDP=0`) have no `remote=`, no UDP server and no dialling

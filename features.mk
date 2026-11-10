@@ -52,9 +52,8 @@
 #                   TINY targets which default to 0.
 #
 #   RDP             RDP=1 builds reliable UDP: rdp_open sessions and
-#                   /interface/udp reliable=. Defaults to 1,
-#                   except TINY targets which default to 0 until a consumer
-#                   (sync over 802.15.4 or RS485) needs it there.
+#                   /interface/udp reliable=, and sync over UDP. Defaults
+#                   to 1 on every target.
 #
 #   SFP             SFP=1 builds the SFP cage, its module decoder and
 #                   /interface/sfp. Few boards have a cage, so it defaults

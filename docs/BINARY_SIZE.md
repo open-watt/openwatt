@@ -114,9 +114,8 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-10-30 | #865 | ldc 1.42.0 | 2,997,824 | 141,887 | 4,194,304 | `COREDUMP=1`; reads answer with seq-tagged `val`s through one sample-frame encoder, bundled, `history_req` and the value in `add` gone, `index_for_time` exact: -2,144 over master b0b2f318 (2,999,968, #857 merged); deployed to 4547 |
 | 2026-11-04 | ow/tx-floor | ldc 1.42.0 | 2,998,688 | 141,887 | 4,194,304 | `COREDUMP=1`; interfaces admit by class (`tx_floor`) and invite waiting producers in turn, the packet queue invites as frames leave it, UDP sends carry a PCP and DSCP: +608 over master 6b8d0672a (2,998,080); OTA to F993 |
 | 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
-| 2026-11-07 | d13b9d28 | ldc 1.42.0 | 3,009,824 | 141,839 | 4,194,304 | master control row for #915, COREDUMP=1, IDF 6.1 |
-| 2026-11-07 | e3a1fc99 | ldc 1.42.0 | 3,003,952 | 141,855 | 4,194,304 | ow/sync-rdp (#915): sync over RDP, reliability sublayer deleted, -5,872 vs its control row |
-| 2026-11-07 | ce588a93 | ldc 1.42.0 | 3,004,752 | 141,855 | 4,194,304 | ow/sync-rdp (#915) on #921 (idle probe), review fixes; OTA to F993 for the hardware run, -5,072 vs the control row |
+| 2026-11-11 | 8a145cbd | ldc 1.42.0 | 3,010,496 | 141,839 | 4,194,304 | master control row for #915, COREDUMP=1, IDF 6.1 |
+| 2026-11-11 | ow/sync-rdp | ldc 1.42.0 | 3,005,056 | 141,855 | 4,194,304 | #915: sync over RDP, reliability sublayer deleted, an authority beaconing no sync port is logged: -5,440 vs the control row; OTA to F993 |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 

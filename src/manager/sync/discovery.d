@@ -679,7 +679,11 @@ private:
         session.port = a.sync_port;
         size_t known = n.links.length;
         n.touch_link(iface, local, session, n.last_seen);
-        if (known && n.links.length > known)
+        if (n.links.length == known)
+            return;
+        if (a.role == PeerRole.authority && !a.sync_port)
+            log.warning("authority '", a.name, "' via ", iface ? iface.name[] : "ip", " (", from, ") announces no sync port: it runs firmware without RDP sync, or its listener does not serve this link");
+        else if (known)
             log.debug_("node '", a.name, "' also reachable via ", iface ? iface.name[] : "ip", " (", from, ")");
     }
 }
