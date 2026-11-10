@@ -262,6 +262,12 @@ protected:
         }
 
         Message* msg = alloc_message();
+        if (!msg)
+        {
+            log.warning("out of memory; rejecting frame");
+            add_tx_drop();
+            return -1;
+        }
         msg.queue_time = getTime();
         msg.length = cast(ubyte)message.length;
         msg.buffer[0 .. message.length] = message[];
@@ -680,7 +686,11 @@ private:
             msg.next = null;
         }
         else
+        {
             msg = alloc!Message();
+            if (!msg)
+                return null;
+        }
         msg.send_time = MonoTime();
         return msg;
     }
