@@ -212,19 +212,6 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
         pfd.fd = rd;
         pfd.events = POLLIN;
         int pr = poll(&pfd, 1, g_watchdog_ms);
-
-        if (probation && !committed && getTime() - start >= seconds(g_commit_secs))
-        {
-            committed = true;
-            good = target;
-            fail = 0;
-            clear_next();
-            write_state(good, fail);
-            slog(tconcat("slot ", target, " soaked ", g_commit_secs, "s; now good"));
-        }
-
-        if (pr < 0)
-            continue; // EINTR; retry
         if (pr == 0)
         {
             slog(tconcat("no heartbeat for ", g_watchdog_ms, "ms; killing app"));
@@ -232,6 +219,23 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
             reap(pid);
             return EndKind.failed;
         }
+
+        if (probation && !committed && getTime() - start >= seconds(g_commit_secs))
+        {
+            if (write_state(target, 0))
+            {
+                committed = true;
+                good = target;
+                fail = 0;
+                clear_next();
+                slog(tconcat("slot ", target, " soaked ", g_commit_secs, "s; now good"));
+            }
+            else
+                slog(tconcat("slot ", target, " soaked but state write failed; retrying"));
+        }
+
+        if (pr < 0)
+            continue; // EINTR; retry
 
         ubyte[256] buf = void;
         for (;;)
@@ -318,21 +322,20 @@ bool read_state(ref int good, ref int fail)
     return good > 0;
 }
 
-void write_state(int good, int fail)
+bool write_state(int good, int fail)
 {
     char[4096] tb = void, pb = void;
     const(char)* tmp = zname(tb, "openwatt.state.tmp");
     const(char)* dst = zname(pb, "openwatt.state");
     if (!tmp || !dst)
-        return;
+        return false;
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
     if (fd < 0)
-        return;
+        return false;
     const(char)[] txt = tconcat("good=", good, "\nfail=", fail, "\n");
-    write(fd, txt.ptr, txt.length);
-    fsync(fd);
-    close(fd);
-    rename(tmp, dst); // atomic swap; a concurrent reader never sees a half-written file
+    bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
+    ok = close(fd) == 0 && ok;
+    return ok && rename(tmp, dst) == 0; // atomic swap; a concurrent reader never sees a half-written file
 }
 
 int read_next()
