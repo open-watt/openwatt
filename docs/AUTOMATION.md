@@ -88,7 +88,8 @@ or the UI. Built-in providers are the `Application` itself (`element:`), cron
 
 `if=<expr>` is an optional gate, a quoted expression on the same engine the energy policy layer
 runs on: it reads any element by `@path`, compares with units (`@site.power > 2000W`), and a falsey
-result skips the action. Two qualifiers operate on its resolutions, and both require it:
+result skips the action. `$value` is the trigger's datum, as in the action; at a `for=` deadline
+it is the snapshot of the event that began the episode, and on arm it is null. Two qualifiers operate on its resolutions, and both require it:
 
 - `edge=level|rising|falling` (default `level`) picks which transitions fire. `level` fires on
   every trigger that finds the condition true. For a boolean element that already behaves like a
