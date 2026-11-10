@@ -167,14 +167,13 @@ private:
     void on_fire(MonoTime scheduled)
     {
         _fire_scheduled = false;
+        if (_done)
+            return;
         if (kind != TimeKind.duration && !due(getSysTime()))
         {
             schedule_fire(getTime());
             return;
         }
-
-        SignalEvent ev = { source: "time" };
-        sink(scheduled, ev);
 
         bool one_shot = false;
         final switch (kind)
@@ -196,7 +195,12 @@ private:
 
         if (one_shot)
             _done = true;
-        else
+
+        // consumed before emitting: a clock or timezone change made by the action re-arms only the next one
+        SignalEvent ev = { source: "time" };
+        sink(scheduled, ev);
+
+        if (!_done && !_fire_scheduled)
             schedule_fire(scheduled);
     }
 
@@ -432,4 +436,45 @@ unittest
         assert(s._next == edge + dur!"hours"(1));
         assert(s.due(edge + dur!"hours"(1)));
     }
+
+    // an action that changes the timezone emits its occurrence once; the probe stands in for the
+    // change notification, which re-arms the sub as on_wallclock_change would without an app
+    static struct Probe
+    {
+    nothrow @nogc:
+        TimeSub s;
+        int count;
+        void emit(MonoTime, ref const SignalEvent)
+        {
+            ++count;
+            timezone_override = dur!"hours"(count & 1 ? 11 : 10);
+            apply_timezone();
+            if (s._done)
+                return;
+            s.retime(getSysTime());
+            s._fire_scheduled = true;
+        }
+    }
+    Probe probe = Probe(s);
+    s.sink = &probe.emit;
+    timezone_override = dur!"hours"(10);
+    apply_timezone();
+
+    s.kind = TimeKind.absolute;
+    s.when_has_tz = true;
+    s.when = get_date_time(getSysTime() - dur!"seconds"(1));
+    s.advance_wallclock(getSysTime());
+    s.on_fire(getTime());
+    s.on_fire(getTime());
+    assert(probe.count == 1 && s._done);
+
+    s._done = false;
+    s.kind = TimeKind.tod;
+    s.at = time_of_day(get_date_time(get_local_time() + dur!"hours"(12)));
+    s.advance_wallclock(getSysTime());
+    s._next = getSysTime();
+    probe.count = 0;
+    s.on_fire(getTime());
+    assert(probe.count == 1 && s._fire_scheduled);
+    assert(!s.due(getSysTime()));
 }
