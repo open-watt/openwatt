@@ -3,6 +3,10 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-11: discover available BLE radios
+
+Show controls for local BLE radios announced by the authority; Espressif builds with `USE_BLE=0` omit their built-in radios.
+
 ## 2026-11-07: display newly bound scalar sensors as awaiting data
 
 Bindings can announce elements and their formats before the first sample.
