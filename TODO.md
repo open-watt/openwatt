@@ -788,8 +788,6 @@ one primitive (most belong in urt) and its copies deleted:
   `send_queued_messages` keeps the `Message` linked across `ash_send`; a shutdown inside that call
   recycles it, then `send_msg` relinks it into the in-flight list. #912 removed the failing-line
   trigger; a reentrant tap (Infrastructure) still reaches it.
-- **ASH and CPC do not check `alloc!Message`** (2026-11-07, #917 review): an exhausted heap is a
-  null dereference in the send path instead of a counted drop.
 - **`ZigbeeInterface._ezsp_client` is a raw pointer**: destroying the EZSP client leaves the
   interface restarting against freed memory (`startup()` reads `_ezsp_client.running`). Make it
   an `ObjectRef!EZSPClient` per the dependency rules.

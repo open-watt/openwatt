@@ -1061,7 +1061,11 @@ private:
         if (msg)
             _free_messages = msg.next;
         else
+        {
             msg = alloc!Message();
+            if (!msg)
+                return null;
+        }
         msg.next = null;
         msg.enqueue_time = MonoTime();
         msg.send_time = MonoTime();
@@ -1087,6 +1091,12 @@ private:
             return false;
         }
         Message* msg = alloc_message();
+        if (!msg)
+        {
+            log.warning("endpoint ", endpoint, " out of memory; rejecting frame");
+            add_tx_drop();
+            return false;
+        }
         msg.poll = poll;
         msg.pcp = pcp;
         msg.enqueue_time = getTime();
