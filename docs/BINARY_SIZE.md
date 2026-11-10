@@ -245,6 +245,13 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
 | 2026-10-08 | #825 | ldc 1.43.0 | 1,686,272 | 51,100 | 2,097,152 | doorbells; also the first row with the stream and sync series since #800 |
 
+### x86_64 Windows, `make COMPILER=ldc CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | matched master baseline |
+| 2026-11-11 | f4f892a5 | ldc 1.43.0 | 3,884,304 | 120,824 | - | positive cron interval admission |
+
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
 differ from the defaults; a different invocation is a different table.
