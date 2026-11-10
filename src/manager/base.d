@@ -1286,8 +1286,8 @@ nothrow @nogc:
         _id = object ? object.id : CID();
     }
 
-    inout(Type) get() inout pure
-        => cast(inout(Type))cast(void*)get_item(_id); // void* makes it into a static cast, since we're already confident of the type
+    inout(Type) get() inout
+        => cast(inout(Type))dyn_cast!Type(get_item(_id));
 
     String name() const pure
         => get_id(_id);
@@ -2156,6 +2156,19 @@ unittest
             ++count;
         }
     }
+
+    // a same-name claimant of an unrelated type must not resolve through a typed ObjectRef
+    ElemTestObject typed = alloc!ElemTestObject(table.allocate("ref-typed", 0));
+    table.bind(typed.id, typed);
+    ObjectRef!ElemTestObject typed_ref = typed;
+    assert(typed_ref.get is typed);
+    table.remove(typed.id);
+    LifecycleTestObject imposter = alloc!LifecycleTestObject(table.allocate("ref-typed", 0));
+    table.bind(imposter.id, imposter);
+    assert(typed_ref.get is null);
+    table.remove(imposter.id);
+    free(imposter);
+    free(typed);
 
     // destroy() starts teardown immediately; the object leaves with shutdown already run
     LifecycleTestObject lifecycle = alloc!LifecycleTestObject(table.allocate("lifecycle-o", 0));
