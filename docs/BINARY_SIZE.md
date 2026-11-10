@@ -64,6 +64,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-18 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | matched #947 master baseline |
 | 2026-11-18 | 0142be42 | ldc 1.43.0 | 3,890,832 | 153,592 | - | #947 before cleanup; +2,868 B vs cd7edf82 |
 | 2026-11-18 | #947 | ldc 1.43.0 | 3,888,924 | 153,592 | - | shared transmit body and style cleanup; +960 B vs cd7edf82, RAM unchanged |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | subscriber dispatch baseline |
+| 2026-11-11 | codex/router-subscriber-dispatch | ldc 1.43.0 | 3,876,092 | 120,824 | - | fixed-slot dispatch on 8a145cbd; 8,180 B smaller |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
