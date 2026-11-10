@@ -769,10 +769,9 @@ one primitive (most belong in urt) and its copies deleted:
 - **Zigbee node bookkeeping outside the up window** (review of #872, 2026-11-05): the controller
   probes every entry in the module-wide `unknown_nodes` over its own network (`controller.d`, the
   probe loop) and `probe_response` matches on short ID alone, so with two Zigbee interfaces one can
-  attach the other's node; the response has no network-up check either. The coordinator's
-  child-joined handler (`get_child_data` path in `coordinator.d`) attaches even when the EZSP call
-  failed, with no joined or running guard. And the EUI lookup's PAN guard sees a change of PAN, not a
-  network re-formed on the same PAN under another extended PAN ID; key it by the network incarnation.
+  attach the other's node; the response has no network-up check either. And the EUI lookup's PAN
+  guard sees a change of PAN, not a network re-formed on the same PAN under another extended PAN ID;
+  key it by the network incarnation.
 
 - **Shutdown asserts while a Zigbee request is still on its fibre** (seen 2026-11-05 on the Pi):
   `/system/reboot` landed while an EZSP request was waiting on ASH retransmits and a ZCL request was
