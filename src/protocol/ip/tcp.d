@@ -17,7 +17,7 @@ import router.iface.endpoint;
 import router.iface.ethernet;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener;
+import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener, pseudo_header_checksum_v4;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
@@ -2006,17 +2006,7 @@ uint generate_iss()
 }
 
 
-// IPv4 pseudo-header checksum: sum of src_addr, dst_addr, zero+protocol, transport_length.
-ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    ubyte[12] ph = void;
-    ph[0..4]   = src.b;
-    ph[4..8]   = dst.b;
-    ph[8]      = 0;
-    ph[9]      = protocol;
-    ph[10..12] = transport_length.nativeToBigEndian;
-    return internet_checksum(ph[]);
-}
+
 
 
 // our own definition, not an RFC one: [src:6][dst:6][0][protocol][length:2]

@@ -22,6 +22,8 @@ import manager.plugin;
 import manager.reactor;
 import manager : EventPriority, g_app;
 
+import router.iface.endpoint : UdpHeader;
+
 import protocol.ip.address;
 import protocol.ip.pool;
 import protocol.ip.route;
@@ -302,6 +304,49 @@ void store_ipv6_address(ubyte* destination, IPv6Addr address) pure
     foreach (i; 0 .. 8)
         storeBigEndian(cast(ushort*)destination + i, address.s[i]);
 }
+
+// RFC 768: a zero checksum means the sender opted out, and 0xFFFF on the wire is a computed zero.
+bool parse_udp4(const(ubyte)[] datagram, out const(IPv4Header)* ip, out ushort src_port, out ushort dst_port, out const(ubyte)[] payload, bool verified = false, bool header_verified = false)
+{
+    if (datagram.length < IPv4Header.sizeof + UdpHeader.sizeof)
+        return false;
+
+    const h = cast(const IPv4Header*)datagram.ptr;
+    size_t hdr_len = h.ihl * 4;
+    size_t total = bigEndianToNative!ushort(h.total_length);
+    if (h.version_ != 4 || hdr_len < IPv4Header.sizeof || total < hdr_len + UdpHeader.sizeof || total > datagram.length)
+        return false;
+    if (h.protocol != IPProtocol.udp || (bigEndianToNative!ushort(h.flags_frag) & 0x3FFF) != 0)
+        return false;
+    if (!verified && !header_verified && internet_checksum(datagram[0 .. hdr_len]) != 0)
+        return false;
+
+    const(ubyte)[] segment = datagram[hdr_len .. total];
+    ushort udp_len = bigEndianToNative!ushort(segment[4 .. 6][0 .. 2]);
+    if (udp_len < UdpHeader.sizeof || udp_len > segment.length)
+        return false;
+    ushort checksum = bigEndianToNative!ushort(segment[6 .. 8][0 .. 2]);
+    if (checksum != 0 && !verified && internet_checksum(segment[0 .. udp_len], pseudo_header_checksum_v4(IPAddr(h.src), IPAddr(h.dst), IPProtocol.udp, udp_len)) != 0)
+        return false;
+
+    ip = h;
+    src_port = bigEndianToNative!ushort(segment[0 .. 2][0 .. 2]);
+    dst_port = bigEndianToNative!ushort(segment[2 .. 4][0 .. 2]);
+    payload = segment[UdpHeader.sizeof .. udp_len];
+    return true;
+}
+
+ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
+{
+    align(8) ubyte[12] ph = void;
+    ph[0..4]   = src.b;
+    ph[4..8]   = dst.b;
+    ph[8]      = 0;
+    ph[9]      = protocol;
+    storeBigEndian(cast(ushort*)(ph.ptr + 10), transport_length);
+    return internet_checksum(ph[]);
+}
+
 
 ushort pseudo_header_checksum_v6(ref const(ubyte)[16] source, ref const(ubyte)[16] destination, uint length, IPProtocol protocol) pure
 {
