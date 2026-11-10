@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 3,878,352 | 153,592 | - | matched #967 master source; fixed BUILD_ID=79b58c6d1c22 |
+| 2026-11-24 | cf8909c3 | ldc 1.43.0 | 3,879,080 | 153,592 | - | #967 numeric remote readback/deltas, reset and shared hostname storage; +728 B, RAM flat; same fixed BUILD_ID |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
