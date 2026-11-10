@@ -36,9 +36,6 @@ CONFIG_HEAP_POISONING_DISABLED=y
 # WiFi: allow buffers in PSRAM if available
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
-# No Bluetooth
-CONFIG_BT_ENABLED=n
-
 # Flash: 4MB SPI flash (most common ESP32 module)
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 

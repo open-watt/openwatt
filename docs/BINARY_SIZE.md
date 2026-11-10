@@ -146,6 +146,13 @@ Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is hea
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | #732 | ldc 1.43.0 | 3,195,392 | 164,903 | 3,670,016 | first row; ESP-IDF v6.1, with the 802.15.4 interface. Built with the unmerged uRT RISC-V bring-up patched in locally, without which a C5 does not link |
+| 2026-11-25 | #953 | ldc 1.42.0 | 3,245,200 | 167,229 | 3,670,016 | USE_BLE=1; CI dispatch 45536682439, ESP-IDF v6.1, master 096172ce plus this change and the ESP CI toolchain from #992 |
+
+### ESP32-C6 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c6 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #953 | ldc 1.42.0 | 3,229,104 | 160,587 | 3,670,016 | first row; USE_BLE=1; CI dispatch 45536682439, ESP-IDF v6.1, master 096172ce plus this change and the ESP CI toolchain from #992 |
 
 ### ESP32-S31 Function-CoreBoard-1, `make esp-idf-build BOARD=esp32-s31-function-coreboard-1 CONFIG=release`
 

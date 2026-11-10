@@ -16,6 +16,8 @@ make BOARD=smartevse-v30
 make BOARD=smartevse-v30 PLATFORM=esp32
 ```
 
+Espressif radio builds use `USE_BLE=0/1` for both the D driver and NimBLE; it defaults off on Tiny targets and on for other BLE-capable chips. Only `USE_BLE` selects Bluetooth: a `board.mk` may default it, and it overrides the Bluetooth enable settings of any `sdkconfig.defaults`. After changing it, delete the build's `obj/<build>[_<board>]_<config>/esp-idf/sdkconfig`; this also applies to a build directory made before the switch existed.
+
 ## Board directory
 
 A board lives at `platforms/<family>/boards/<name>/` and contains:
@@ -36,7 +38,7 @@ A board lives at `platforms/<family>/boards/<name>/` and contains:
 - `system.conf`, required. It replaces the platform's baked-in startup script.
 - `sdkconfig.defaults`, required for Espressif boards. ESP-IDF applies it after
   the platform defaults, so board values override the reference development
-  board.
+  board, except the Bluetooth enable settings (`USE_BLE`).
 - `partitions.csv`, optional. If present, the board's `sdkconfig.defaults`
   selects it with a project-relative path such as
   `boards/example/partitions.csv`.
