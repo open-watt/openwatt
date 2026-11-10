@@ -510,13 +510,22 @@ nothrow @nogc:
 
     final void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
-        if (_num_subscribers >= _subscribers.length)
-        {
-            log.error("subscriber table full (", cast(uint)_subscribers.length, " slots); refusing subscription");
-            return;
-        }
         bool was = _num_subscribers != 0;
-        _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
+        if (_num_subscribers < _subscribers.length)
+            _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
+        else
+        {
+            // a full table mid-dispatch may hold slots nulled by unsubscribe; a restart takes one back
+            size_t i = 0;
+            while (i < _subscribers.length && _subscribers[i].recv_packet)
+                ++i;
+            if (i == _subscribers.length)
+            {
+                log.error("subscriber table full (", cast(uint)_subscribers.length, " slots); refusing subscription");
+                return;
+            }
+            _subscribers[i] = InterfaceSubscriber(filter, packet_handler, user_data);
+        }
         if (!was)
             on_subscribers_changed(true);
     }
@@ -2582,5 +2591,19 @@ unittest
     tap.feed(p);
     assert(a.hits == 1 && b.hits == 1 && tap.count == 1);
     tap.unsubscribe(&a.recv);
+    assert(tap.count == 0);
+
+    // a restart in a full table takes back the slot its own unsubscribe nulled
+    Watcher[8] full;
+    full[3].restart = true;
+    foreach (ref w; full)
+        tap.subscribe(&w.recv, w.filter);
+    tap.feed(p);
+    tap.feed(p);
+    foreach (ref w; full)
+        assert(w.hits == 2);
+    assert(tap.count == 8);
+    foreach (ref w; full)
+        tap.unsubscribe(&w.recv);
     assert(tap.count == 0);
 }
