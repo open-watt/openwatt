@@ -58,6 +58,7 @@ const(char)[] reset_reason()
 
 Duration os_timezone_offset()
 {
+    tzset();
     time_t now = time(null);
     tm local;
     if (!localtime_r(&now, &local))
@@ -228,6 +229,7 @@ extern(C) nothrow @nogc
     int rename(scope const(char)* oldp, scope const(char)* newp);
     int atoi(scope const(char)* s);
     time_t time(time_t* t);
+    void tzset();
     tm* localtime_r(scope const time_t* timep, tm* result);
 }
 
