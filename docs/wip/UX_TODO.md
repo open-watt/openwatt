@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-11: validate automation intervals
+
+Reject negative "every:<duration>" values and zero recurring intervals. Allow zero only
+with "repeat=false" for immediate one-shots. The "schedule" shorthand is recurring and
+requires a positive duration.
+
 ## 2026-11-07: display newly bound scalar sensors as awaiting data
 
 Bindings can announce elements and their formats before the first sample.

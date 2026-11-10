@@ -247,6 +247,9 @@ StringResult parse_time(ref const SignalUri uri, out TimeSpec spec)
 
     if (const(char)[] r = uri_param(uri.query, "repeat"))
         spec.repeat = !(r == "false" || r == "0" || r == "no");
+    if (spec.kind == TimeKind.duration &&
+        (spec.schedule < Duration.zero || (spec.repeat && spec.schedule == Duration.zero)))
+        return StringResult("duration must be positive");
     return StringResult.success;
 }
 
@@ -273,4 +276,24 @@ ubyte parse_days(const(char)[] s)
         }
     }
     return mask ? mask : 0x7F;
+}
+
+unittest
+{
+    SignalUri uri = { scheme: "every" };
+    TimeSpec spec;
+    foreach (body; ["0s", "-1s"])
+    {
+        uri.body = body;
+        assert(!parse_time(uri, spec));
+    }
+    uri.query = "repeat=false";
+    uri.body = "-1s";
+    assert(!parse_time(uri, spec));
+    uri.body = "0s";
+    assert(parse_time(uri, spec) && !spec.repeat && spec.schedule == Duration.zero);
+    uri.query = null;
+    uri.body = "1ms";
+    assert(parse_time(uri, spec));
+    assert(spec.kind == TimeKind.duration && spec.schedule == 1.msecs);
 }
