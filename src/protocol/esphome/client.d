@@ -52,8 +52,13 @@ nothrow @nogc:
     }
 
     // Properties...
-    ref const(String) remote() const pure
-        => _host;
+    const(char)[] remote() const
+    {
+        import urt.mem.temp : tstring;
+        if (!_host.empty || _remote == InetAddress())
+            return _host[];
+        return tstring(_remote);
+    }
     void remote(InetAddress value)
     {
         // apply explicit port if assigned
@@ -266,6 +271,9 @@ package:
         client._stream = null;
         client.remote(resolved);
         assert(client.get_address() == "192.0.2.1");
+        assert(client.remote == "192.0.2.1:6053");
+        client.remote(InetAddress(IPAddr(192, 0, 2, 2), 0));
+        assert(client.remote == "192.0.2.2:6053");
     }
 
 private:
