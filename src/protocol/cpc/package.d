@@ -212,19 +212,22 @@ protected:
     // forward()). We enqueue it on the target endpoint's channel and let the scheduler emit it.
     override int transmit(Packet* packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
-        scope (exit) packet_free(packet);
-        if (packet.type != PacketType.cpc)
+        if (packet.type != PacketType.cpc || packet.length == 0 || packet.length > cpc_max_payload)
+        {
+            packet_free(packet);
             return -1;
-        CPCFrame f = packet.hdr!CPCFrame;
-        const(ubyte)[] payload = cast(const(ubyte)[])packet.data;
-        if (payload.length == 0)
-            return -1;
-
-        Channel* ch = channel_for(f.endpoint);
-        if (!ch)
+        }
+        ubyte endpoint = packet.hdr!CPCFrame.endpoint;
+        PCP pcp = packet.pcp;
+        Channel* ch = channel_for(endpoint);
+        Packet* kept = ch ? packet_keep(packet) : null;
+        if (!kept)
+        {
+            packet_free(packet);
             return -1; // endpoint not connected
+        }
 
-        if (!channel_submit(*ch, f.endpoint, payload, packet.pcp, false))
+        if (!channel_submit(*ch, endpoint, kept, pcp, false))
             return -1; // queue full
 
         schedule();
@@ -430,8 +433,8 @@ protected:
         Message* m = ch.in_flight;
         if (m)
             log.errorf("{0} unresponsive: no ack after {1} retransmits; in-flight seq {2} len {3} age {4}ms first: {5}",
-                       who, _max_retransmits, m.seq, m.length, cast(uint)(now - m.enqueue_time).as!"msecs",
-                       cast(void[])m.buffer[0 .. m.length < 8 ? m.length : 8]);
+                       who, _max_retransmits, m.seq, m.payload.length, cast(uint)(now - m.enqueue_time).as!"msecs",
+                       cast(void[])m.payload[0 .. m.payload.length < 8 ? m.payload.length : 8]);
         else
             log.error(who, " unresponsive: no ack after ", _max_retransmits, " retransmits");
     }
@@ -696,7 +699,8 @@ private:
         // endpoint-state commands ride ep0 as reliable i-frames at network-control priority; the poll
         // bit is mandatory on system-endpoint commands -- it's what makes the secondary send the
         // PROP_VALUE_IS reply rather than just link-acking the frame
-        if (!channel_submit(_ep0, 0, cmd[0 .. len], PCP.nc, true))
+        Packet* request = alloc_packet!RawFrame(cmd[0 .. len]);
+        if (!request || !channel_submit(_ep0, 0, request, PCP.nc, true))
             return false;
         _pending_cmds ~= PendingCommand(seq, prop, requester, getTime());
         schedule();
@@ -1061,37 +1065,43 @@ private:
         if (msg)
             _free_messages = msg.next;
         else
+        {
             msg = alloc!Message();
-        msg.next = null;
-        msg.enqueue_time = MonoTime();
-        msg.send_time = MonoTime();
-        msg.pcp = PCP.be;
-        msg.seq = 0;
-        msg.retries = 0;
-        msg.poll = false;
-        msg.length = 0;
+            if (!msg)
+                return null;
+        }
+        *msg = Message();
         return msg;
     }
 
     void release_message(Message* msg)
     {
+        packet_free(msg.packet);
+        msg.packet = null;
         msg.next = _free_messages;
         _free_messages = msg;
     }
 
-    bool channel_submit(ref Channel ch, ubyte endpoint, const(ubyte)[] payload, PCP pcp, bool poll)
+    bool channel_submit(ref Channel ch, ubyte endpoint, Packet* packet, PCP pcp, bool poll)
     {
         if (ch.queue_len >= max_channel_queue)
         {
             log.warning("endpoint ", endpoint, " tx queue full (", max_channel_queue, "); rejecting frame");
+            packet_free(packet);
             return false;
         }
         Message* msg = alloc_message();
+        if (!msg)
+        {
+            log.warning("endpoint ", endpoint, " out of memory; rejecting frame");
+            add_tx_drop();
+            packet_free(packet);
+            return false;
+        }
+        msg.packet = packet;
         msg.poll = poll;
         msg.pcp = pcp;
         msg.enqueue_time = getTime();
-        msg.length = cast(ushort)payload.length;
-        msg.buffer[0 .. payload.length] = payload[];
         if (!ch.queue)
             ch.queue = msg;
         else
@@ -1160,7 +1170,7 @@ private:
     void channel_emit(ref Channel ch, ubyte endpoint, Message* msg)
     {
         msg.send_time = getTime();
-        emit_frame(endpoint, iframe_control(msg.seq, ch.rx_ack, msg.poll), msg.buffer[0 .. msg.length]);
+        emit_frame(endpoint, iframe_control(msg.seq, ch.rx_ack, msg.poll), msg.payload);
     }
 
     void channel_ack(ref Channel ch, ubyte endpoint, ubyte ack)
@@ -1217,7 +1227,7 @@ private:
         Message* prev = null;
         for (Message* m = ch.queue; m; prev = m, m = m.next)
         {
-            if (m.length >= 2 && m.buffer[1] == seq)
+            if (m.payload.length >= 2 && m.payload[1] == seq)
             {
                 if (prev)
                     prev.next = m.next;
@@ -1503,23 +1513,28 @@ private:
 
     void clear_channel(CPCInterface trunk)
     {
+        void drop(Message* msg)
+        {
+            if (trunk)
+                trunk.release_message(msg);
+            else
+            {
+                packet_free(msg.packet);
+                free(msg);
+            }
+        }
+
         Message* next;
         while (_channel.in_flight)
         {
             next = _channel.in_flight.next;
-            if (trunk)
-                trunk.release_message(_channel.in_flight);
-            else
-                free(_channel.in_flight);
+            drop(_channel.in_flight);
             _channel.in_flight = next;
         }
         while (_channel.queue)
         {
             next = _channel.queue.next;
-            if (trunk)
-                trunk.release_message(_channel.queue);
-            else
-                free(_channel.queue);
+            drop(_channel.queue);
             _channel.queue = next;
         }
         _channel = Channel();
@@ -1587,6 +1602,54 @@ unittest
     assert(cmd[0] == SystemCommand.prop_value_get && cmd[1] == 7);
     assert(cmd[2 .. 4][0 .. 2].littleEndianToNative!ushort == 4);
     assert(cmd[4 .. 8][0 .. 4].littleEndianToNative!uint == SystemProperty.rx_capability);
+
+    // a channel holds the packets it is given: an ack releases the frame in flight, and a full queue refuses
+    static class Line : Stream
+    {
+    nothrow @nogc:
+        ~this() {}
+        enum type_name = "cpc-test-line";
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Line, id, flags);
+        }
+        override ptrdiff_t transmit(const(void)[] data)
+        {
+            output ~= cast(const(ubyte)[])data;
+            return data.length;
+        }
+        Array!ubyte output;
+    }
+    Line line = Collection!Line().create("cpc-test-line");
+    CPCInterface cpc = Collection!CPCInterface().create("cpc-test");
+    scope (exit)
+    {
+        cpc.destroy();
+        line.destroy();
+        foreach (_; 0 .. 4)
+        {
+            Collection!BaseInterface().update_all();
+            Collection!Stream().update_all();
+        }
+    }
+    foreach (_; 0 .. 2)
+        Collection!Stream().update_all();
+    assert(line.running);
+    cpc._stream = line;
+
+    assert(cpc.channel_submit(cpc._ep0, 0, alloc_packet!RawFrame(cmd[0 .. len]), PCP.nc, true));
+    cpc.schedule();
+    Message* sent = cpc._ep0.in_flight;
+    assert(sent && sent.payload == cmd[0 .. len] && line.output.length == cpc_header_size + len + 2);
+    cpc.channel_ack(cpc._ep0, 0, 1);
+    assert(!cpc._ep0.in_flight && cpc._free_messages is sent && !sent.packet);
+
+    foreach (_; 0 .. max_channel_queue)
+        assert(cpc.channel_submit(cpc._ep0, 0, alloc_packet!RawFrame(cmd[0 .. len]), PCP.nc, true));
+    assert(!cpc.channel_submit(cpc._ep0, 0, alloc_packet!RawFrame(cmd[0 .. len]), PCP.nc, true));
+    cpc.channel_clear(cpc._ep0);
+    for (Message* m = cpc._free_messages; m; m = m.next)
+        assert(!m.packet);
 }
 
 
@@ -1686,15 +1749,18 @@ struct Buffers
 
 struct Message
 {
+nothrow @nogc:
     Message* next;
+    Packet* packet;
     MonoTime enqueue_time;  // head-of-line age, for the scheduler's PCP tiebreak
     MonoTime send_time;
     PCP pcp;
     ubyte seq;
     ubyte retries;
     bool poll;
-    ushort length;
-    ubyte[cpc_max_payload] buffer;
+
+    const(ubyte)[] payload() const
+        => cast(const(ubyte)[])packet.data;
 }
 
 struct Channel

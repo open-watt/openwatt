@@ -757,12 +757,6 @@ one primitive (most belong in urt) and its copies deleted:
 - **Expose scheduling validation metrics**: queue wait by PCP, deadline promotions and
   expiries, queue rejection and DEI eviction counts, reserved-slot dispatches,
   user-command submission-to-completion latency, and reactive receive-to-dispatch latency.
-- **ASH recycles a queued message under its own send** (2026-11-07, #917 review):
-  `send_queued_messages` keeps the `Message` linked across `ash_send`; a shutdown inside that call
-  recycles it, then `send_msg` relinks it into the in-flight list. #912 removed the failing-line
-  trigger; a reentrant tap (Infrastructure) still reaches it.
-- **ASH and CPC do not check `alloc!Message`** (2026-11-07, #917 review): an exhausted heap is a
-  null dereference in the send path instead of a counted drop.
 
 ## Automation
 
