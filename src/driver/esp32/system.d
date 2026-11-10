@@ -2,6 +2,8 @@ module driver.esp32.system;
 
 version (Espressif):
 
+import urt.time : Duration;
+
 import driver.system : ResetClass, ImageId, OtaImage;
 
 nothrow @nogc:
@@ -46,6 +48,8 @@ else
     enum bool has_download_mode = false;
 
 bool reboot_pending() => false;
+
+Duration os_timezone_offset() => Duration.zero;
 
 // Why the chip came up. A restart that never reached the panic handler leaves no
 // core dump, so without this a brownout and a clean reboot look identical.

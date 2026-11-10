@@ -3,6 +3,7 @@ module driver.windows.system;
 version (Windows):
 
 import urt.log;
+import urt.time : Duration, dur;
 
 import driver.system : ResetClass, ImageId, OtaImage;
 
@@ -23,6 +24,18 @@ enum bool has_download_mode = false;
 // no reset-reason source on this platform
 const(char)[] reset_reason() => null;
 ResetClass reset_class() => ResetClass.unknown;
+
+Duration os_timezone_offset()
+{
+    import urt.internal.sys.windows;
+
+    TIME_ZONE_INFORMATION tzi;
+    DWORD id = GetTimeZoneInformation(&tzi);
+    if (id == TIME_ZONE_ID_INVALID)
+        return Duration.zero;
+    LONG bias = tzi.Bias + (id == TIME_ZONE_ID_DAYLIGHT ? tzi.DaylightBias : tzi.StandardBias);
+    return dur!"minutes"(-bias);
+}
 
 bool   reboot_pending() => false;
 bool   ota_supported() => false;

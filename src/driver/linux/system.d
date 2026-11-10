@@ -3,10 +3,10 @@ module driver.linux.system;
 version (linux):
 
 import urt.endian : LittleEndian;
-import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
+import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, time_t, tm, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
 import urt.log;
 import urt.string.format : tconcat;
-import urt.time : MonoTime, getTime, msecs;
+import urt.time : Duration, MonoTime, getTime, msecs, seconds;
 
 import driver.system : ResetClass, ImageId, OtaImage;
 
@@ -54,6 +54,15 @@ const(char)[] reset_reason()
 {
     const(char)* v = getenv("OW_LAST_END");
     return v ? v[0 .. cstrlen(v)] : null;
+}
+
+Duration os_timezone_offset()
+{
+    time_t now = time(null);
+    tm local;
+    if (!localtime_r(&now, &local))
+        return Duration.zero;
+    return local.tm_gmtoff.seconds;
 }
 
 ResetClass reset_class()
@@ -218,6 +227,8 @@ extern(C) nothrow @nogc
     int chmod(scope const(char)* path, mode_t mode);
     int rename(scope const(char)* oldp, scope const(char)* newp);
     int atoi(scope const(char)* s);
+    time_t time(time_t* t);
+    tm* localtime_r(scope const time_t* timep, tm* result);
 }
 
 void watchdog_write(const(char)[] s)

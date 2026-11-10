@@ -173,6 +173,12 @@ deepest non-zero word, against the thread's reservation or `RLIMIT_STACK`. A dee
 of zero reads as unused, so hosts can under-report by the tail of the deepest frame. With
 no stack limit, Linux prints the peak alone.
 
+`/system/timezone` prints the local time offset, marked `(os)` when it follows the OS zone.
+`/system/set-timezone offset=<duration>` overrides it with a signed duration such as `10h` or
+`-5h30min`; without `offset` it returns to the OS zone, re-read each minute so DST applies.
+Platforms with no OS zone stay at UTC unless set. Energy day totals, planner deadlines and cron
+`at:` (and `when:` without an explicit zone) use local time.
+
 `/system/uptime` prints time since start, and `/system/time` the current date and time.
 `/system/sysinfo time` marks it `(unsynchronised)` until wall time is set.
 
