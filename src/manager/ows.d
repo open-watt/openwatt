@@ -117,7 +117,8 @@ nothrow @nogc:
         size_t bytes;
         bool fresh = read_at(_file, (cast(void*)&fh)[0 .. FileHeader.sizeof], 0, bytes) != Result.success
                   || bytes < FileHeader.sizeof;
-        if (!fresh && (fh.magic != FileHeader.init.magic || fh.version_ != FileHeader.init.version_))
+        if (!fresh && (fh.magic != FileHeader.init.magic || fh.version_ != FileHeader.init.version_
+                       || fh.header_bytes < FileHeader.sizeof))
         {
             writeError("series container: TRUNCATED ", path, ": its history is DISCARDED (format version ",
                        fh.version_, ", magic '", fh.magic[], "'; this build reads version ", FileHeader.init.version_, ")");
@@ -144,51 +145,48 @@ nothrow @nogc:
         Array!(Bucket*) adopted;
         ulong offset = fh.header_bytes;
         _end = fh.header_bytes;
+        ulong size = get_size(_file);
         FormatId run_id = FormatId.invalid;
         ulong next_index = 0;
         while (offset)
         {
             BlockHeader hdr;
-            if (read_at(_file, (cast(void*)&hdr)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
-                || bytes < BlockHeader.sizeof || hdr.header_bytes < BlockHeader.sizeof)
+            if (!read_header(offset, hdr) || !block_sane(hdr, offset, size))
+            {
+                writeWarning("series container: corrupt block at ", offset, " in ", path, "; history truncated there");
                 break;
-            if (hdr.format_block == 0)
+            }
+            ulong anchor = hdr.format_block ? hdr.format_block : offset;
+            if (anchor != _fmt_anchor)
             {
-                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
-                            offset + BlockHeader.sizeof, bytes) != Result.success
-                    || bytes < BlockFormatHeader.sizeof)
+                if (anchor < fh.header_bytes || anchor > offset || !load_format(anchor))
+                {
+                    writeWarning("series container: corrupt format at ", anchor, " in ", path, "; history truncated there");
                     break;
-                _fmt_anchor = offset;
+                }
                 run_id = register_block_format(_afmt);
             }
-            else if (hdr.format_block != _fmt_anchor)
+            if (!payload_sane(hdr, *format_info(run_id)))
             {
-                // referenced run isn't the walking one (future compaction); resolve directly
-                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
-                            hdr.format_block + BlockHeader.sizeof, bytes) != Result.success
-                    || bytes < BlockFormatHeader.sizeof)
-                    break;
-                _fmt_anchor = hdr.format_block;
-                run_id = register_block_format(_afmt);
+                writeWarning("series container: corrupt block at ", offset, " in ", path, "; history truncated there");
+                break;
             }
-            if (hdr.count && run_id.valid)
-            {
-                Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
-                *b = Bucket.init;
-                b.format = run_id;
-                b.first_index = next_index;
-                b.count = hdr.count;
-                b.first_tick = hdr.first_tick;
-                b.end_tick = hdr.last_tick;
-                b.heap_used = hdr.heap_bytes;
-                b.codec = hdr.codec;
-                b.packed_bytes = hdr.payload_bytes;
-                b.sealed = true;
-                b.ended = (hdr.flags & BlockHeader.Flags.ended) != 0;
-                b.file_offset = offset + hdr.header_bytes;
-                adopted ~= b;
-                next_index += hdr.count;
-            }
+
+            Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
+            *b = Bucket.init;
+            b.format = run_id;
+            b.first_index = next_index;
+            b.count = hdr.count;
+            b.first_tick = hdr.first_tick;
+            b.end_tick = hdr.last_tick;
+            b.heap_used = hdr.heap_bytes;
+            b.codec = hdr.codec;
+            b.packed_bytes = hdr.payload_bytes;
+            b.sealed = true;
+            b.ended = (hdr.flags & BlockHeader.Flags.ended) != 0;
+            b.file_offset = offset + hdr.header_bytes;
+            adopted ~= b;
+            next_index += hdr.count;
             _tail = offset;
             _end = offset + hdr.header_bytes + hdr.payload_bytes;
             offset = hdr.next;
@@ -375,6 +373,52 @@ private:
     bool _open;
     bool _end_gap;
     bool _end_pending;
+
+    // the successor must lie strictly beyond the block so the walk always advances
+    static bool block_sane(ref const BlockHeader hdr, ulong offset, ulong size) pure
+    {
+        ulong end = offset + hdr.header_bytes + hdr.payload_bytes;
+        return hdr.header_bytes >= BlockHeader.sizeof && hdr.payload_bytes
+            && hdr.last_index >= hdr.first_index && hdr.last_index - hdr.first_index < uint.max
+            && hdr.last_tick >= hdr.first_tick
+            && end <= size && (!hdr.next || hdr.next >= end);
+    }
+
+    static bool payload_sane(ref const BlockHeader hdr, ref const DataFormat f) pure
+    {
+        bool irregular = (hdr.flags & BlockHeader.Flags.irregular) != 0;
+        if (irregular == f.regular || (hdr.heap_bytes && (f.count || hdr.heap_bytes > 0x10000)))
+            return false;
+        ulong count = hdr.count;
+        ulong image = (irregular ? count * uint.sizeof : 0) + count * f.stride + hdr.heap_bytes;
+        return image <= uint.max && (hdr.codec != ows_codec_raw || hdr.payload_bytes == image);
+    }
+
+    static bool format_sane(ref const BlockFormatHeader bf) pure
+    {
+        if (bf.type >= ValueType.user || bf.kind > SeriesKind.max || bf.header_bytes < BlockFormatHeader.sizeof)
+            return false;
+        DataFormat f = DataFormat(cast(ValueType)bf.type, cast(SeriesKind)bf.kind);
+        f.count = bf.count;
+        if (bf.count == 0 ? bf.type != ValueType.char_ && bf.type != ValueType.u8 : !f.stride_fits)
+            return false;
+        return bf.stride == f.stride;
+    }
+
+    bool load_format(ulong anchor)
+    {
+        BlockHeader hdr;
+        BlockFormatHeader bf;
+        size_t bytes;
+        if (!read_header(anchor, hdr) || hdr.format_block != 0
+            || read_at(_file, (cast(void*)&bf)[0 .. BlockFormatHeader.sizeof], anchor + BlockHeader.sizeof, bytes) != Result.success
+            || bytes < BlockFormatHeader.sizeof || !format_sane(bf)
+            || hdr.header_bytes < BlockHeader.sizeof + bf.header_bytes)
+            return false;
+        _fmt_anchor = anchor;
+        _afmt = bf;
+        return true;
+    }
 
     static FormatId register_block_format(ref const BlockFormatHeader bf)
     {
@@ -602,6 +646,90 @@ unittest
         e.teardown();
     }
     delete_file(fpath);
+
+    // a corrupt container keeps the valid prefix: each case patches a fresh two-block file
+    enum cpath = "ows_corrupt_unittest.tmp";
+    void make_file()
+    {
+        delete_file(cpath);
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(cpath, *h));
+        foreach (i; 0 .. 4)
+        {
+            e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
+            if (i == 1)
+                e.invalidate(e.last_update);
+        }
+        h.seal(h.buckets[$-1]);
+        foreach (b; h.buckets[])
+            assert(c.append(b));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    void patch(ulong offset, ulong value, size_t size)
+    {
+        File f;
+        size_t n;
+        assert(urt.file.open(f, cpath, FileOpenMode.ReadWrite) == Result.success);
+        assert(write_at(f, (cast(const(void)*)&value)[0 .. size], offset, n) == Result.success && n == size);
+        urt.file.close(f);
+    }
+    size_t reopen()
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(cpath, *h));
+        size_t n = h.buckets.length;
+        if (n)
+        {
+            RecordBlock blk = e.read_records(0, 16);
+            assert(blk.count == 2 && blk.get!double(1) == 1.5);
+        }
+        c.close_();
+        h.container = null;
+        e.teardown();
+        return n;
+    }
+    enum b1 = FileHeader.sizeof;
+    enum fmt1 = b1 + BlockHeader.sizeof;
+    enum block_image = 2 * (uint.sizeof + double.sizeof);
+    enum b2 = fmt1 + BlockFormatHeader.sizeof + block_image;
+
+    make_file();
+    assert(reopen() == 2);
+    patch(b2 + BlockHeader.next.offsetof, b2, 8);
+    assert(reopen() == 1);
+    make_file();
+    patch(b2 + BlockHeader.format_block.offsetof, b2 + 8, 8);
+    assert(reopen() == 1);
+    make_file();
+    patch(b2 + BlockHeader.payload_bytes.offsetof, 0x7FFF_FFFF, 4);
+    assert(reopen() == 1);
+    make_file();
+    patch(b1 + BlockHeader.first_index.offsetof, 5, 8);
+    assert(reopen() == 0);
+    make_file();
+    patch(b1 + BlockHeader.payload_bytes.offsetof, block_image - 8, 4);
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.type.offsetof, 0xFF, 1);
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.count.offsetof, 64, 1);
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.stride.offsetof, 9, 2);
+    assert(reopen() == 0);
+    make_file();
+    patch(FileHeader.header_bytes.offsetof, 0, 2);
+    assert(reopen() == 0);
+    delete_file(cpath);
 }
 
 version (unittest)
