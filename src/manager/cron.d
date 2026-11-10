@@ -9,6 +9,7 @@ import urt.time;
 import manager : g_app, get_module;
 import manager.plugin;
 import manager.signal;
+import manager.system : apply_timezone;
 
 nothrow @nogc:
 
@@ -141,6 +142,7 @@ private:
     bool _fire_scheduled;
     bool _wc_subscribed;
     bool _done;
+    bool _settling;
 
     void schedule_fire(MonoTime anchor)
     {
@@ -165,6 +167,11 @@ private:
     void on_fire(MonoTime scheduled)
     {
         _fire_scheduled = false;
+        if (kind != TimeKind.duration && !due(getSysTime()))
+        {
+            schedule_fire(getTime());
+            return;
+        }
 
         SignalEvent ev = { source: "time" };
         sink(scheduled, ev);
@@ -195,7 +202,7 @@ private:
 
     void on_wallclock_change(Duration)
     {
-        if (_done)
+        if (_done || _settling)
             return;
         if (_fire_scheduled)
         {
@@ -219,14 +226,34 @@ private:
     // change jumps over fires late rather than being lost; a UTC step recomputes from now
     void retime(SysTime now)
     {
+        if (!rebase(now))
+            advance_wallclock(now);
+    }
+
+    bool rebase(SysTime now)
+    {
         Duration offset = local_offset(now);
-        if (kind == TimeKind.tod && offset != _offset)
+        if (offset == _offset)
+            return false;
+        if (kind == TimeKind.tod)
         {
             _next = _next + (_offset - offset);
             _offset = offset;
         }
         else
             advance_wallclock(now);
+        return true;
+    }
+
+    // the minute poll can lag an offset change, so settle it before consuming an occurrence;
+    // the rebase is done here rather than by the change notification this raises
+    bool due(SysTime now)
+    {
+        _settling = true;
+        apply_timezone();
+        _settling = false;
+        rebase(now);
+        return _next <= now;
     }
 }
 
@@ -379,4 +406,30 @@ unittest
     set_timezone(dur!"hours"(2));
     s.retime(seen);
     assert(s._next <= seen);
+
+    // fall back reaching the fire before the poll: due at the transition instant, OS already +1
+    import manager.system : timezone_override;
+    scope(exit)
+    {
+        timezone_override = Duration.zero;
+        apply_timezone();
+        timezone_override = null;
+    }
+    SysTime edge = get_sys_time(day) + dur!"hours"(1);
+    s.kind = TimeKind.tod;
+    s.at = TimeOfDay(3, 0, 0, 0);
+    s.when.hour = 3;
+    s.when.minute = 0;
+    foreach (kind; [ TimeKind.tod, TimeKind.absolute ])
+    {
+        timezone_override = dur!"hours"(2);
+        apply_timezone();
+        s.kind = kind;
+        s.advance_wallclock(get_sys_time(day));
+        assert(s._next == edge);
+        timezone_override = dur!"hours"(1);
+        assert(!s.due(edge));
+        assert(s._next == edge + dur!"hours"(1));
+        assert(s.due(edge + dur!"hours"(1)));
+    }
 }
