@@ -135,18 +135,23 @@ int ota_end(uint handle)
     }
 
     // hand the staged slot to the supervisor; it launches it on the next restart.
-    char[4096] next_buf = void;
+    char[4096] tmp_buf = void, next_buf = void;
+    const(char)* tmp_path = zpath(tmp_buf, "openwatt.next.tmp");
     const(char)* next_path = zpath(next_buf, "openwatt.next");
-    if (next_path)
+    int fd = tmp_path && next_path ? open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, mode_0755) : -1;
+    if (fd < 0)
     {
-        int fd = open(next_path, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
-        if (fd >= 0)
-        {
-            const(char)[] txt = tconcat(g_ota_slot, '\n');
-            write(fd, txt.ptr, txt.length);
-            fsync(fd);
-            close(fd);
-        }
+        log_error("ota", "create slot marker failed");
+        return -1;
+    }
+    const(char)[] txt = tconcat(g_ota_slot, '\n');
+    bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
+    ok = close(fd) == 0 && ok;
+    if (!ok || rename(tmp_path, next_path) != 0)
+    {
+        log_error("ota", "write slot marker failed");
+        unlink(tmp_path);
+        return -1;
     }
     log_notice("ota", "staged slot ", g_ota_slot, "; restart to apply");
     return 0;
