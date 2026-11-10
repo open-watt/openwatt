@@ -211,7 +211,7 @@ nothrow @nogc:
     // The CPU port only needs promiscuous mode to feed a sniffer; bridge-addressed
     // and broadcast/multicast frames reach it without it.
     final bool cpu_port_wants_promisc() const
-        => _num_subscribers != 0;
+        => _num_subscribers != _tombstones;
 
     protected override void on_subscribers_changed(bool any)
     {

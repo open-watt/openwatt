@@ -510,13 +510,26 @@ nothrow @nogc:
 
     final void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
-        if (_num_subscribers >= _subscribers.length)
+        bool was = _num_subscribers != _tombstones;
+        if (_num_subscribers < _subscribers.length)
+            _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
+        else if (_tombstones)
+        {
+            foreach (ref sub; _subscribers[])
+            {
+                if (!sub.recv_packet)
+                {
+                    sub = InterfaceSubscriber(filter, packet_handler, user_data);
+                    break;
+                }
+            }
+            --_tombstones;
+        }
+        else
         {
             log.error("subscriber table full (", cast(uint)_subscribers.length, " slots); refusing subscription");
             return;
         }
-        bool was = _num_subscribers != 0;
-        _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
         if (!was)
             on_subscribers_changed(true);
     }
@@ -525,15 +538,19 @@ nothrow @nogc:
     {
         foreach (i, ref sub; _subscribers[0.._num_subscribers])
         {
-            if (sub.recv_packet is packet_handler)
+            if (sub.recv_packet !is packet_handler)
+                continue;
+            // a walk in progress holds this range, so leave a hole for it to skip and compact once it ends
+            if (_dispatching)
             {
-                // remove this subscriber
-                if (i < --_num_subscribers)
-                    sub = _subscribers[_num_subscribers];
-                if (_num_subscribers == 0)
-                    on_subscribers_changed(false);
-                return;
+                sub.recv_packet = null;
+                ++_tombstones;
             }
+            else if (i < --_num_subscribers)
+                sub = _subscribers[_num_subscribers];
+            if (_num_subscribers == _tombstones)
+                on_subscribers_changed(false);
+            return;
         }
     }
 
@@ -646,11 +663,7 @@ nothrow @nogc:
         if (!packet)
             return -1;
 
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
-        {
-            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
-        }
+        dispatch(packet, PacketDirection.outgoing);
 
         int result = -1;
         if (Packet* writable = packet_mutable(packet))
@@ -926,13 +939,22 @@ protected:
 
     final void fire_subscribers(const(Packet)* packet)
     {
+        dispatch(packet, PacketDirection.incoming);
+    }
+
+    // entries added during the walk are not visited: the range is fixed at entry
+    final void dispatch(const(Packet)* packet, PacketDirection dir)
+    {
         if (!_num_subscribers)
             return;
+        ++_dispatching;
         foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
-            if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
+            if (subscriber.recv_packet && (subscriber.filter.direction & dir) && subscriber.filter.match(packet))
+                subscriber.recv_packet(packet, this, dir, subscriber.user_data);
         }
+        if (--_dispatching == 0 && _tombstones)
+            compact_subscribers();
     }
 
     bool bind_vlan(VLANInterface vlan_interface, bool remove)
@@ -1072,6 +1094,8 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[8] _subscribers;
     ubyte _num_subscribers;
+    ubyte _tombstones;
+    ubyte _dispatching;
     bool _tx_admitted;
     bool _tx_inviting;
     bool _tx_spent;
@@ -1098,6 +1122,18 @@ private:
     {
         _tx_deferred = false;
         invite_tx();
+    }
+
+    void compact_subscribers()
+    {
+        ubyte n = 0;
+        foreach (ref sub; _subscribers[0.._num_subscribers])
+        {
+            if (sub.recv_packet)
+                _subscribers[n++] = sub;
+        }
+        _num_subscribers = n;
+        _tombstones = 0;
     }
 
     bool linked(const(TxWaiter)* w) const pure
@@ -1990,6 +2026,48 @@ unittest
         bounded.destroy();
         Collection!BaseInterface().update_all();
     }
+
+    // a handler that resubscribes mid-walk, or drops a peer behind it, neither repeats nor skips anyone
+    static struct Counter
+    {
+    nothrow @nogc:
+        BaseInterface iface;
+        Counter* drop;
+        uint hits;
+        bool resubscribe;
+        void recv(const(Packet)*, BaseInterface, PacketDirection, void*)
+        {
+            ++hits;
+            PacketFilter f = PacketFilter(PacketType.raw);
+            if (resubscribe)
+            {
+                iface.unsubscribe(&recv);
+                iface.subscribe(&recv, f);
+            }
+            if (drop)
+                iface.unsubscribe(&drop.recv);
+        }
+    }
+    Counter[8] counters;
+    PacketFilter raw_filter = PacketFilter(PacketType.raw);
+    foreach (ref k; counters)
+    {
+        k.iface = open;
+        open.subscribe(&k.recv, raw_filter);
+    }
+    counters[0].resubscribe = true;
+    counters[2].drop = &counters[1];
+    counters[3].drop = &counters[4];
+    ubyte[4] raw;
+    StackPacket sp;
+    sp.init!RawFrame(raw[]);
+    open.fire_subscribers(&sp.packet);
+    foreach (i, ref k; counters)
+        assert(k.hits == (i == 4 ? 0 : 1));
+    assert(open._num_subscribers == 6 && open._tombstones == 0);
+    foreach (ref k; counters)
+        open.unsubscribe(&k.recv);
+    assert(open._num_subscribers == 0);
 
     Producer whole = Producer(10);
     whole.waiter = TxWaiter(&whole.produce);
