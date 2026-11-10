@@ -700,6 +700,7 @@ An AP interface is one BSS served by a WiFi radio.
 A BLE interface is one Bluetooth LE radio. It scans continuously while running,
 feeding discovered advertisements to `/protocol/ble/device/print`, and carries
 connections opened by `/protocol/ble/client` entries.
+Espressif local radios require `USE_BLE=1`; Tiny builds default to `USE_BLE=0`.
 
 | Property | Access | Values | Default | Description |
 | --- | --- | --- | --- | --- |

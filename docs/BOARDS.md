@@ -16,6 +16,8 @@ make BOARD=smartevse-v30
 make BOARD=smartevse-v30 PLATFORM=esp32
 ```
 
+Espressif radio builds use `USE_BLE=0/1` for both the D driver and NimBLE; it defaults off on Tiny targets and on for other BLE-capable chips. Board defaults may override it. Regenerate an existing IDF sdkconfig after changing it.
+
 ## Board directory
 
 A board lives at `platforms/<family>/boards/<name>/` and contains:

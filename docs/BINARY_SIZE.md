@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | matched master baseline |
+| 2026-11-11 | ow/fix-esp-ble-switch | ldc 1.43.0 | 3,885,324 | 120,824 | - | BLE switch plus merged runtime trace/bounds fixes |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -146,6 +148,7 @@ Limit is the 3.5 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is hea
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-21 | #732 | ldc 1.43.0 | 3,195,392 | 164,903 | 3,670,016 | first row; ESP-IDF v6.1, with the 802.15.4 interface. Built with the unmerged uRT RISC-V bring-up patched in locally, without which a C5 does not link |
+| 2026-11-11 | #953 | ldc 1.43.0 | 3,286,160 | 167,213 | 3,670,016 | USE_BLE=1; local IDF 6.1 firmware, source equivalent to 4c5cfa18 |
 
 ### ESP32-S31 Function-CoreBoard-1, `make esp-idf-build BOARD=esp32-s31-function-coreboard-1 CONFIG=release`
 
@@ -242,6 +245,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,540,724 | 46,440 | 4,194,304 | also share property marking |
 | 2026-11-25 | 1102ee0f | ldc 1.43.0 | 1,540,788 | 46,448 | 4,194,304 | matched control for the boxed Variant lookup |
 | 2026-11-25 | #990 / urt a448e54 | ldc 1.43.0 | 1,535,444 | 46,448 | 4,194,304 | shared boxed Variant lookup saves 5,344 bytes |
+| 2026-11-08 | 8a145cbd | ldc 1.43.0 | 1,601,996 | 46,424 | - | matched CI baseline |
+| 2026-11-10 | #953 (4c5cfa18) | ldc 1.43.0 | 1,602,092 | 46,424 | - | CI; runtime pin and BLE switch |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
@@ -268,6 +273,10 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-08 | 8a145cbd | ldc 1.43.0 | 1,013,153 | 87,952 | - | CI D0 child d0fw.bin |
+| 2026-11-08 | 8a145cbd | ldc 1.43.0 | 2,644,040 | 186,130 | 4,190,208 | CI M0 m0fw.bin, packing D0 |
+| 2026-11-10 | #953 (4c5cfa18) | ldc 1.43.0 | 1,013,477 | 87,952 | - | CI D0 child d0fw.bin |
+| 2026-11-10 | #953 (4c5cfa18) | ldc 1.43.0 | 2,644,232 | 186,130 | 4,190,208 | CI M0 m0fw.bin, packing D0 |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
@@ -287,6 +296,14 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 | 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
 | 2026-10-08 | #825 | ldc 1.43.0 | 1,686,272 | 51,100 | 2,097,152 | doorbells; also the first row with the stream and sync series since #800 |
+| 2026-11-08 | 8a145cbd | ldc 1.43.0 | 1,624,680 | 50,568 | - | matched CI baseline |
+| 2026-11-10 | #953 (4c5cfa18) | ldc 1.43.0 | 1,624,776 | 50,568 | - | CI; runtime pin and BLE switch |
+
+### ESP32-C6 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c6 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | #953 | ldc 1.43.0 | 3,270,048 | 160,571 | 3,670,016 | USE_BLE=1; local IDF 6.1 firmware, source equivalent to 4c5cfa18 |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
