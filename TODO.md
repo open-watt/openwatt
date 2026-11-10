@@ -738,10 +738,7 @@ one primitive (most belong in urt) and its copies deleted:
   `ESP_MAC_EFUSE_EXT` plus the base MAC and orders that pair the other way. Settle which order
   is on-air correct against the standard before changing anything, since the address we display
   is also the one we hand the radio.
-- **The H2 needs the soft-float processor entry the C5 and C6 got** and does not have it: it is
-  still on `e906`, which has no atomic extension, so every `__atomic_*` libcall is undefined at
-  link. IDF builds it `rv32imac` like the others. The H2 also cannot fit the full tier at all,
-  at 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
+- **The H2 cannot fit the full tier**: 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
 
 - **WiFi coexistence on C5/C6**: the 802.15.4 radio shares the RF path with WiFi;
   `CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y` is required when both run and is not yet set.
@@ -790,9 +787,6 @@ one primitive (most belong in urt) and its copies deleted:
   trigger; a reentrant tap (Infrastructure) still reaches it.
 - **ASH and CPC do not check `alloc!Message`** (2026-11-07, #917 review): an exhausted heap is a
   null dereference in the send path instead of a counted drop.
-- **`ZigbeeInterface._ezsp_client` is a raw pointer**: destroying the EZSP client leaves the
-  interface restarting against freed memory (`startup()` reads `_ezsp_client.running`). Make it
-  an `ObjectRef!EZSPClient` per the dependency rules.
 
 ## Automation
 
