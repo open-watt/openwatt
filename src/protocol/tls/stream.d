@@ -122,8 +122,8 @@ nothrow @nogc:
         return null;
     }
 
-    ref const(String) remote() const pure
-        => _conn.host;
+    const(char)[] remote() const
+        => _conn.remote_name();
     const(char)[] remote(String value)
     {
         if (value.empty)
@@ -1315,6 +1315,20 @@ unittest
         this(CID id, ObjectFlags flags = ObjectFlags.none)
         {
             super(collection_type_info!Transport, id, flags);
+        }
+    }
+
+    {
+        TLSStream endpoint = alloc!TLSStream(Collection!TLSStream().allocate_id("tls-remote-test"));
+        scope (exit) free(endpoint);
+        foreach (remote; ["192.0.2.1:443", "[2001:db8::1]:443", "example.invalid:443"])
+        {
+            assert(endpoint.remote(remote.make_string()) is null);
+            assert(endpoint.remote() == remote);
+            assert(endpoint.get("remote").asString == remote);
+            MutableString!0 exported;
+            endpoint.export_config(exported, TLSStream.path);
+            assert(exported[].contains(tconcat("remote=", '"', remote, '"')[]));
         }
     }
 
