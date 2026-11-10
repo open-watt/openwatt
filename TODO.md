@@ -471,16 +471,6 @@ one primitive (most belong in urt) and its copies deleted:
   Add authenticated rekey transitions and retransmission tests without resetting
   receive counters when already installed key material is repeated.
 
-- **[uRT build, in passing] Respect the compiler's Tiny version flag**:
-  `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
-  before compilation. Use the existing compiler-specific `VERSION_FLAG`.
-
-- **[Host build, local work] Reconcile the unfinished power regulator**:
-  The untracked `src/driver/power/regulator.d` references `ComponentEvent.materialised`,
-  `set_device_online` and `note_activity`, which are absent from the current model.
-  It is discovered by the full source build; reconcile it with the intended model
-  work before expecting this working checkout's host build to pass.
-
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
   detection at `urt.internal.traits:376`; installed stable DMD 2.113 passes the
