@@ -3,6 +3,10 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-11: retain numeric TLS endpoints
+
+Read TLS stream remote properties as the configured endpoint, including numeric addresses and ports.
+
 ## 2026-11-07: display newly bound scalar sensors as awaiting data
 
 Bindings can announce elements and their formats before the first sample.
