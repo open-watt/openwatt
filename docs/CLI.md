@@ -1211,6 +1211,17 @@ half cycle.
 /driver/power/regulator/add name=dump device=dump-load psm-pin=25 zc-pin=26 level=100 droop-start=50.2 droop-full=52
 ```
 
+### `/device`
+
+| Command | Syntax | Description |
+| --- | --- | --- |
+| `add` | `/device/add id=<id> profile=<profile> [name=<name>] [model=<model>]` | Creates a device from a profile that has no protocol-coupled elements; a binding is not needed. |
+| `print` | `/device/print [filter=<pattern>] [--watch\|-w] [--expand\|-e]` | A tree of devices, components and elements with their latest values. `--watch` keeps a live view; `--expand` opens every node in it. |
+
+`filter` is a wildcard pattern over dotted paths (`device.component.element`); a node is shown
+when it or anything below it matches. Name it explicitly: `/device/print filter=m1*`. A bare
+`/device/print m1*` lands in the flag arguments and prints everything.
+
 ### `/element/link`
 
 A link keeps two elements' values in step: whichever updates, the other takes its value, and the

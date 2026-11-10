@@ -2071,10 +2071,6 @@ this is what remains.
   - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
     tick and render only the visible slice; they should format and fit only the slice.
 
-- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
-  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
-  in the variadic `args` and prints everything.
-
 - **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
   Assistant discovery it drives (entity mapping, writers, availability aggregated into
   `status.online`) have no CLI.md section at all.
