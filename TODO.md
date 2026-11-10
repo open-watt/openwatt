@@ -337,8 +337,6 @@ and the panel left outstanding.
   (a review probe confirmed it disarms): a module test would build its own Application, and an
   Application cannot be created twice in one process, since its destructor releases neither the page
   pool nor the event queues, intrinsics and signal providers its constructor registers.
-- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
-  reaches the console as a quantity rather than through `Duration`'s own formatting.
 - **Duration compact-format footprint**: verify with the supported target compiler and linked
   helpers. The assembly review is complete; isolated LDC 1.43 / LLVM 22 `-Oz` probes of both
   functions and their numeric tables are 528 bytes below the original on ARM968E-S, 116 bytes
