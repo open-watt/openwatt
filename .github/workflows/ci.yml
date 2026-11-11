@@ -88,6 +88,36 @@ jobs:
           name: openwatt_${{ matrix.os }}_${{ matrix.arch }}
           path: ./bin/${{ matrix.arch }}_${{ matrix.os }}_release/openwatt
 
+  # Hosts drive the kernel stack, so this is the only job that runs the in-tree IP stack's tests.
+  internal-ip-stack:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [dmd, ldc]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup D Compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
+
+      - name: Install mbedtls
+        uses: ./.github/actions/apt-install
+        with:
+          key: mbedtls
+          packages: libmbedtls-dev
+
+      - name: Build unittest
+        run: make ARCH=x86_64 CONFIG=unittest OS=linux COMPILER=${{ matrix.compiler }} USE_INTERNAL_IP_STACK=1
+
+      - name: Test
+        run: ./bin/x86_64_linux_unittest/openwatt_test
+
   baremetal:
     runs-on: ubuntu-latest
     strategy:
