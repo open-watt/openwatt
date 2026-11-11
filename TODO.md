@@ -314,9 +314,6 @@ and the panel left outstanding.
   a 500-character line, `/log/print`) arrived with holes on both cores. The stream now queues what
   the line has not taken and a UART write never waits; retest on both cores, and find what held
   TX for 50 ms if the stall remains.
-- **Type-ahead is echoed again after every command**: the session redraws all pending input with
-  each prompt, so n queued commands echo n(n+1)/2 times (40 queued: 755 copies, 13 KB). Echo
-  pending input once.
 - **ESP32 UART close leaves the module clock on**: the port is set up through IDF's public calls
   (`uart_param_config`, `uart_set_pin`), and IDF marks the module enabled in its driver's state;
   only `uart_driver_delete` on an installed driver turns it off, so turning it off ourselves would
