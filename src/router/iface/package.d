@@ -372,10 +372,10 @@ nothrow @nogc:
     final ulong rx_packets() const => _status.rx_packets;
     final ulong tx_dropped() const => _status.tx_dropped;
     final ulong rx_dropped() const => _status.rx_dropped;
-    final ulong rx_rate() const => _status.rx_rate;
-    final ulong tx_rate() const => _status.tx_rate;
-    final ulong tx_rate_max() const => _status.tx_rate_max;
-    final ulong rx_rate_max() const => _status.rx_rate_max;
+    final ulong rx_rate() const => _status.rate.rx;
+    final ulong tx_rate() const => _status.rate.tx;
+    final ulong tx_rate_max() const => _status.rate.tx_max;
+    final ulong rx_rate_max() const => _status.rate.rx_max;
     final Milliseconds avg_queue_time() const => Milliseconds(float(_status.avg_queue_us) / 1000);
     final Milliseconds avg_service_time() const => Milliseconds(float(_status.avg_service_us) / 1000);
     final Milliseconds max_service_time() const => Milliseconds(float(_status.max_service_us) / 1000);
@@ -394,16 +394,10 @@ nothrow @nogc:
         _status.rx_packets = 0;
         _status.tx_dropped = 0;
         _status.rx_dropped = 0;
-        _status.tx_rate = 0;
-        _status.rx_rate = 0;
-        _status.tx_rate_max = 0;
-        _status.rx_rate_max = 0;
+        _status.rate.reset();
         _status.avg_queue_us = 0;
         _status.avg_service_us = 0;
         _status.max_service_us = 0;
-        _last_tx_bytes = 0;
-        _last_rx_bytes = 0;
-        _last_bitrate_sample = MonoTime.init;
 
         mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes", "tx-packets", "rx-packets", "tx-dropped", "rx-dropped",
                                   "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max", "avg-queue-time", "avg-service-time", "max-service-time" ]);
@@ -414,45 +408,9 @@ nothrow @nogc:
 
     void heartbeat(MonoTime now)
     {
-        if (_last_bitrate_sample == MonoTime.init)
-        {
-            // first tick after link-up: anchor the baseline at a grid point; defer the
-            // rate to the next tick so we never report it over a short partial interval.
-            _last_bitrate_sample = now;
-            _last_tx_bytes = _status.tx_bytes;
-            _last_rx_bytes = _status.rx_bytes;
-            return;
-        }
-
-        ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
-        if (elapsed_us == 0)
-            return;
-
-        ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
-        _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
-        _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
-
-        ulong dirty = 0;
-        if (_status.tx_rate != last_tx)
-            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
-        if (_status.rx_rate != last_rx)
-            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
-
-        if (_status.tx_rate > _status.tx_rate_max)
-        {
-            _status.tx_rate_max = _status.tx_rate;
-            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
-        }
-        if (_status.rx_rate > _status.rx_rate_max)
-        {
-            _status.rx_rate_max = _status.rx_rate;
-            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
-        }
-
-        _last_tx_bytes = _status.tx_bytes;
-        _last_rx_bytes = _status.rx_bytes;
-        _last_bitrate_sample = now;
-
+        enum rate_props = prop_index!(typeof(this), "tx-rate");
+        static assert(prop_mask!(typeof(this), [ "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max" ]) == ulong(0xF) << rate_props);
+        ulong dirty = ulong(_status.rate.sample(now, _status.tx_bytes, _status.rx_bytes)) << rate_props;
         if (dirty)
         {
             _props_set |= dirty;
@@ -700,10 +658,6 @@ protected:
     BufferOverflowBehaviour _send_behaviour;
     BufferOverflowBehaviour _recv_behaviour;
 
-    MonoTime _last_bitrate_sample;
-    ulong _last_tx_bytes;
-    ulong _last_rx_bytes;
-
     enum ushort default_mtu = 1500;
 
     void on_mtu_changed() {}
@@ -752,7 +706,7 @@ protected:
     override void online()
     {
         subscribe_master();
-        _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
+        _status.rate.rebase();
         if (carrier())
             set_link(true);
     }
@@ -762,8 +716,8 @@ protected:
         locate(Duration.zero);
         unsubscribe_master();
         set_link(false);
-        _status.tx_rate = 0;
-        _status.rx_rate = 0;
+        _status.rate.tx = 0;
+        _status.rate.rx = 0;
         _status.avg_queue_us = 0;
         _status.avg_service_us = 0;
         _status.max_service_us = 0;

@@ -376,10 +376,10 @@ nothrow @nogc:
     final ulong link_downs() const => _status.link_downs;
     final ulong tx_bytes() const => _status.tx_bytes;
     final ulong rx_bytes() const => _status.rx_bytes;
-    final ulong tx_rate() const => _status.tx_rate;
-    final ulong rx_rate() const => _status.rx_rate;
-    final ulong tx_rate_max() const => _status.tx_rate_max;
-    final ulong rx_rate_max() const => _status.rx_rate_max;
+    final ulong tx_rate() const => _status.rate.tx;
+    final ulong rx_rate() const => _status.rate.rx;
+    final ulong tx_rate_max() const => _status.rate.tx_max;
+    final ulong rx_rate_max() const => _status.rate.rx_max;
     ulong tx_link_speed() const => 0;
     ulong rx_link_speed() const => 0;
 
@@ -394,11 +394,7 @@ nothrow @nogc:
         _status.link_downs = 0;
         _status.tx_bytes = 0;
         _status.rx_bytes = 0;
-        _status.tx_rate = 0;
-        _status.rx_rate = 0;
-        _status.tx_rate_max = 0;
-        _status.rx_rate_max = 0;
-        _last_bitrate_sample = MonoTime.init;
+        _status.rate.reset();
 
         mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes",
                                     "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max" ])();
@@ -409,45 +405,9 @@ nothrow @nogc:
 
     final void heartbeat(MonoTime now)
     {
-        if (_last_bitrate_sample == MonoTime.init)
-        {
-            // first tick after link-up: anchor the baseline at a grid point; defer the
-            // rate to the next tick so we never report it over a short partial interval.
-            _last_bitrate_sample = now;
-            _last_tx_bytes = _status.tx_bytes;
-            _last_rx_bytes = _status.rx_bytes;
-            return;
-        }
-
-        ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
-        if (elapsed_us == 0)
-            return;
-
-        ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
-        _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
-        _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
-
-        ulong dirty = 0;
-        if (_status.tx_rate != last_tx)
-            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
-        if (_status.rx_rate != last_rx)
-            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
-
-        if (_status.tx_rate > _status.tx_rate_max)
-        {
-            _status.tx_rate_max = _status.tx_rate;
-            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
-        }
-        if (_status.rx_rate > _status.rx_rate_max)
-        {
-            _status.rx_rate_max = _status.rx_rate;
-            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
-        }
-
-        _last_tx_bytes = _status.tx_bytes;
-        _last_rx_bytes = _status.rx_bytes;
-        _last_bitrate_sample = now;
-
+        enum rate_props = prop_index!(typeof(this), "tx-rate");
+        static assert(prop_mask!(typeof(this), [ "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max" ]) == ulong(0xF) << rate_props);
+        ulong dirty = ulong(_status.rate.sample(now, _status.tx_bytes, _status.rx_bytes)) << rate_props;
         if (dirty)
         {
             _props_set |= dirty;
@@ -459,7 +419,7 @@ nothrow @nogc:
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
-        _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
+        _status.rate.rebase();
         mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
         tx_handler_changed();
         arm_rx_poll();
@@ -484,8 +444,8 @@ nothrow @nogc:
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
-        _status.tx_rate = 0;
-        _status.rx_rate = 0;
+        _status.rate.tx = 0;
+        _status.rate.rx = 0;
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate" ])();
     }
 
@@ -805,9 +765,6 @@ protected:
     StreamStatus _status;
     StreamOptions _options;
 
-    MonoTime _last_bitrate_sample;
-    ulong _last_tx_bytes;
-    ulong _last_rx_bytes;
     version (SupportLogging)
     {
         bool _logging;

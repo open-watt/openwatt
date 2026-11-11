@@ -386,8 +386,6 @@ one primitive (most belong in urt) and its copies deleted:
   `tls/certificate.d`, `ip/linux_mirror.d`; retransmit timers in tcp.d (RTO), ashv2.d, cpc and
   sync `peer.d` (bounded only by `max_retries`, so its last interval is 64 s). One `Backoff`
   (base, cap, attempt, `next`, `reset`).
-- **Bitrate sampler**: `router/stream/package.d` and `router/iface/package.d` heartbeat samplers
-  are line-for-line copies, as are their status structs in `router/status.d`. One `RateMeter`.
 - **Debounce and pacers**: automation and `protocol/gpio` each schedule their own debounce;
   automation also holds the only throttle and token bucket. Share them as general pacers.
 - **Window with reserve** (limit, in flight, headroom): TCP's free window, sync `max_unacked` with
