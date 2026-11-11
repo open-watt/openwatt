@@ -928,13 +928,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 - **Byte counts carry no unit**: urt's unit encoding has no free unit type for information, so
   `system.mem` values are plain integers of bytes. A unit for bytes means widening that encoding.
 
-- **A numeric-to-text format change with history crashes the next text read**: `text_value`
-  reads the tail bucket without checking that bucket's format, so after `format` switches a
-  numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
-  heap offsets into a heap that is null. `tail_record` likewise hands back the previous format's
-  record. Either the readers ignore a tail whose format is not the element's, or the setter
-  retires the tail.
-
 - **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
   now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
   still 256 and 64 on every part, so a bucket on a 320KB device costs what one on a Pi costs.
