@@ -5,7 +5,7 @@ import manager.collection;
 import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
-import manager.expression : NamedArgument, ScriptCommand, Script, Expression, EvalContext, parse_commands;
+import manager.expression : NamedArgument, ScriptCommand, Script, Expression, EvalContext, free_script_commands, parse_commands;
 
 import urt.array;
 import urt.map;
@@ -180,7 +180,10 @@ final class Context : CommandState
 {
 nothrow @nogc:
 
-    ~this() {}
+    ~this()
+    {
+        free_script_commands(owned_script);
+    }
 
     enum FrameKind : ubyte
     {
@@ -614,6 +617,17 @@ unittest
     console.execute(s, ":set x=42", r);
     console.execute(s, ":put $x", r);
     assert(s.getOutput() == "42\n");
+
+    version (Tiny) {} else
+    {
+        import urt.mem.reclaim : memory_in_use;
+        console.execute(s, ":put a b", r);
+        s.takeOutput();
+        size_t in_use = memory_in_use();
+        console.execute(s, ":put a b", r);
+        s.takeOutput();
+        assert(memory_in_use() == in_use, "an executed script frees the commands it parsed");
+    }
 
     // Embedded targets have no temporary directory for get_temp_filename.
     version (Embedded) {}
