@@ -1351,8 +1351,8 @@ Variant box_int(long v, ref const DataFormat fmt)
     return Variant(v);
 }
 
-Variant box_float(double v, ref const DataFormat fmt)
-    => fmt.desc == DataFormat.Desc.quantity ? Variant(Quantity!double(v, fmt.unit)) : Variant(v);
+Variant box_float(F)(const F v, ref const DataFormat fmt)
+    => fmt.desc == DataFormat.Desc.quantity ? Variant(Quantity!F(v, fmt.unit)) : Variant(v);
 
 bool parse_scalar_text(const(char)[] text, ref const DataFormat fmt, out Variant parsed)
 {
@@ -1460,7 +1460,7 @@ version (unittest)
 unittest
 {
     import urt.meta.enuminfo : enum_info;
-    import urt.si.unit : Ampere, Volt;
+    import urt.si.unit : Ampere, Percent, Volt;
     import urt.time : from_unix_time_ns, SysTime;
     import urt.typereg : find_type_by_name;
 
@@ -1554,6 +1554,13 @@ unittest
     DataFormat volts_f32 = DataFormat(ValueType.f32, SeriesKind.held, ScaledUnit(Volt));
     Variant text_volts = Variant("234.5V");
     assert(unbox_scalar(text_volts, volts_f32, sc) && sc.f32_ > 234.4f && sc.f32_ < 234.6f);
+    float supply = 3.2616f;
+    char[32] printed;
+    assert(box_record(&supply, volts_f32).toString(printed, null, null) == 7 && printed[0 .. 7] == "3.2616V");
+    assert(box_record(&supply, ratio).isFloat);
+    ubyte full = 100;
+    assert(box_record(&full, DataFormat(ValueType.u8, SeriesKind.held, Percent)).toString(printed, null, null) == 4 &&
+           printed[0 .. 4] == "100%");
     Variant text_bare = Variant("42");
     assert(unbox_scalar(text_bare, amps, sc) && sc.u == 42);
     Variant text_wrong = Variant("5V");
