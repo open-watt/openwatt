@@ -6,6 +6,7 @@ import urt.internal.sys.posix : open, close, read, write, fsync, unlink,
                                 ssize_t, O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, O_APPEND,
                                 O_NONBLOCK, F_SETFL, fcntl, poll, pollfd, POLLIN, usleep,
                                 stat, stat_t;
+import urt.file : sync_directory;
 import urt.io : writeln;
 import urt.string.ascii : is_numeric;
 import urt.string.format : tconcat;
@@ -335,7 +336,8 @@ bool write_state(int good, int fail)
     const(char)[] txt = tconcat("good=", good, "\nfail=", fail, "\n");
     bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
     ok = close(fd) == 0 && ok;
-    return ok && rename(tmp, dst) == 0; // atomic swap; a concurrent reader never sees a half-written file
+    // atomic swap; a concurrent reader never sees a half-written file
+    return ok && rename(tmp, dst) == 0 && sync_directory(install_dir());
 }
 
 int read_next()
@@ -370,6 +372,7 @@ void clear_next()
     char[4096] pb = void;
     const(char)* p = zname(pb, "openwatt.next");
     unlink(p);
+    sync_directory(install_dir());
 }
 
 bool bootstrap_slot1()
