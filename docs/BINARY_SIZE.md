@@ -57,6 +57,13 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 
 ## Configurations
 
+### x86_64 windows, `make COMPILER=ldc CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | subscriber dispatch baseline |
+| 2026-11-11 | codex/router-subscriber-dispatch | ldc 1.43.0 | 3,876,092 | 120,824 | - | fixed-slot dispatch on 8a145cbd; 8,180 B smaller |
+
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |

@@ -515,22 +515,31 @@ nothrow @nogc:
             log.error("subscriber table full (", cast(uint)_subscribers.length, " slots); refusing subscription");
             return;
         }
-        bool was = _num_subscribers != 0;
-        _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
-        if (!was)
-            on_subscribers_changed(true);
+        foreach (i, ref sub; _subscribers)
+        {
+            ubyte bit = cast(ubyte)(1 << i);
+            if (_subscriber_mask & bit)
+                continue;
+            sub = InterfaceSubscriber(filter, packet_handler, user_data);
+            _subscriber_mask |= bit;
+            if (++_num_subscribers == 1)
+                on_subscribers_changed(true);
+            return;
+        }
     }
 
     final void unsubscribe(InterfaceSubscriber.PacketHandler packet_handler)
     {
-        foreach (i, ref sub; _subscribers[0.._num_subscribers])
+        foreach (i, ref sub; _subscribers)
         {
-            if (sub.recv_packet is packet_handler)
+            ubyte bit = cast(ubyte)(1 << i);
+            if ((_subscriber_mask & bit) && sub.recv_packet is packet_handler)
             {
-                // remove this subscriber
-                if (i < --_num_subscribers)
-                    sub = _subscribers[_num_subscribers];
-                if (_num_subscribers == 0)
+                _subscriber_mask &= ~bit;
+                for (auto dispatch = _subscriber_dispatch; dispatch; dispatch = dispatch.previous)
+                    dispatch.pending &= ~bit;
+                sub = InterfaceSubscriber.init;
+                if (--_num_subscribers == 0)
                     on_subscribers_changed(false);
                 return;
             }
@@ -646,11 +655,7 @@ nothrow @nogc:
         if (!packet)
             return -1;
 
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
-        {
-            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
-        }
+        fire_subscribers(packet, PacketDirection.outgoing);
 
         int result = -1;
         if (Packet* writable = packet_mutable(packet))
@@ -924,14 +929,23 @@ protected:
         assert(false, "Override this method to implement a _master interface");
     }
 
-    final void fire_subscribers(const(Packet)* packet)
+    final void fire_subscribers(const(Packet)* packet, PacketDirection direction = PacketDirection.incoming)
     {
         if (!_num_subscribers)
             return;
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
+        SubscriberDispatch dispatch = SubscriberDispatch(_subscriber_dispatch, _subscriber_mask);
+        _subscriber_dispatch = &dispatch;
+        scope (exit) _subscriber_dispatch = dispatch.previous;
+
+        // Each active walk keeps its own membership; removal cancels pending deliveries even after slot reuse.
+        foreach (i, ref subscriber; _subscribers)
         {
-            if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
+            ubyte bit = cast(ubyte)(1 << i);
+            if (!(dispatch.pending & bit))
+                continue;
+            dispatch.pending &= ~bit;
+            if ((subscriber.filter.direction & direction) && subscriber.filter.match(packet))
+                subscriber.recv_packet(packet, this, direction, subscriber.user_data);
         }
     }
 
@@ -1070,7 +1084,15 @@ package:
 
 //private:
 protected: // TODO: should probably be private?
+    struct SubscriberDispatch
+    {
+        SubscriberDispatch* previous;
+        ubyte pending;
+    }
+
+    SubscriberDispatch* _subscriber_dispatch;
     InterfaceSubscriber[8] _subscribers;
+    ubyte _subscriber_mask;
     ubyte _num_subscribers;
     bool _tx_admitted;
     bool _tx_inviting;
@@ -2434,4 +2456,120 @@ unittest
     port.destroy();
     link.destroy();
     Collection!BaseInterface().update_all();
+
+    static final class DispatchPort : BaseInterface
+    {
+        enum type_name = "dispatch-test-port";
+    nothrow @nogc:
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!DispatchPort, id, flags);
+            _state = State.running;
+        }
+        ~this() {}
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
+        {
+            packet_free(packet);
+            return 0;
+        }
+        override void on_subscribers_changed(bool any) { ++changes; }
+        void feed(const(Packet)* packet) { fire_subscribers(packet); }
+        uint count() { return _num_subscribers; }
+        uint changes;
+    }
+
+    static struct DispatchWatcher
+    {
+        DispatchPort port;
+        DispatchWatcher* remove;
+        bool resubscribe;
+        bool nested;
+        uint calls;
+        PacketFilter filter;
+
+        void recv(const(Packet)* packet, BaseInterface, PacketDirection, void*) nothrow @nogc
+        {
+            ++calls;
+            if (remove)
+            {
+                auto target = remove;
+                remove = null;
+                port.unsubscribe(&target.recv);
+                if (resubscribe)
+                    port.subscribe(&target.recv, filter);
+            }
+            if (nested)
+            {
+                nested = false;
+                StackPacket outgoing;
+                outgoing.init!RawFrame(null);
+                assert(port.forward(&outgoing.packet) == 0);
+            }
+        }
+    }
+
+    DispatchPort dispatch_port = Collection!DispatchPort().create("subscriber-dispatch-test");
+    scope (exit)
+    {
+        dispatch_port.destroy();
+        Collection!BaseInterface().update_all();
+    }
+    DispatchWatcher[8] watchers;
+    PacketFilter dispatch_filter;
+    dispatch_filter.type = PacketType.unknown;
+    dispatch_filter.direction = cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing);
+    foreach (ref watcher; watchers)
+    {
+        watcher.port = dispatch_port;
+        watcher.filter = dispatch_filter;
+    }
+    StackPacket dispatched;
+    dispatched.init!RawFrame(null);
+
+    foreach (ref watcher; watchers[0 .. 3])
+        dispatch_port.subscribe(&watcher.recv, dispatch_filter);
+    watchers[0].remove = &watchers[0];
+    dispatch_port.feed(&dispatched.packet);
+    assert(watchers[0].calls == 1 && watchers[1].calls == 1 && watchers[2].calls == 1);
+    foreach (ref watcher; watchers[1 .. 3])
+        dispatch_port.unsubscribe(&watcher.recv);
+    assert(dispatch_port.count == 0 && dispatch_port.changes == 2);
+
+    foreach (ref watcher; watchers[0 .. 3])
+    {
+        watcher.calls = 0;
+        dispatch_port.subscribe(&watcher.recv, dispatch_filter);
+    }
+    watchers[0].remove = &watchers[2];
+    watchers[0].nested = true;
+    watchers[1].remove = &watchers[0];
+    dispatch_port.feed(&dispatched.packet);
+    assert(watchers[0].calls == 2 && watchers[1].calls == 2 && watchers[2].calls == 0);
+    dispatch_port.unsubscribe(&watchers[1].recv);
+    assert(dispatch_port.count == 0 && dispatch_port.changes == 4);
+
+    foreach (ref watcher; watchers)
+    {
+        watcher.calls = 0;
+        dispatch_port.subscribe(&watcher.recv, dispatch_filter);
+    }
+    watchers[0].remove = &watchers[0];
+    watchers[0].resubscribe = true;
+    dispatch_port.feed(&dispatched.packet);
+    assert(dispatch_port.count == 8);
+    foreach (ref watcher; watchers)
+        assert(watcher.calls == 1);
+    dispatch_port.feed(&dispatched.packet);
+    foreach (ref watcher; watchers)
+    {
+        assert(watcher.calls == 2);
+        dispatch_port.unsubscribe(&watcher.recv);
+    }
+    assert(dispatch_port.count == 0 && dispatch_port.changes == 6);
+    watchers[0].remove = &watchers[0];
+    watchers[0].resubscribe = false;
+    dispatch_port.subscribe(&watchers[0].recv, dispatch_filter);
+    dispatch_port.feed(&dispatched.packet);
+    assert(dispatch_port.count == 0 && dispatch_port.changes == 8 && watchers[0].calls == 3);
+
 }
