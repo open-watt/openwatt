@@ -733,7 +733,7 @@ protected:
     final void command_finished(CommandState, CommandCompletionState)
     {
         if (_show_prompt && (_features & ClientFeatures.escape))
-            send_prompt_and_buffer(false);
+            write_output(_prompt[], false);
     }
 
     final void show_suggestions(const(String)[] suggestions)
@@ -1690,6 +1690,21 @@ unittest
     assert(session.reclaim_history(size_t.max, reclaimed) == ReclaimResult.exhausted && reclaimed);
     assert(session._history.empty);
     assert(session._history_cursor == 0);
+
+    // type-ahead is echoed once, as the line editor takes it, not again with each prompt
+    {
+        session.set_features(terminal_features(TerminalProfile.xterm));
+        session.show_prompt(true);
+        size_t before = stream.output.length;
+        session.feed_input(":put 1\n:put 2\n:put 3\n:put 4\n");
+        const(char)[] text = cast(const(char)[])stream.output[before .. $];
+        size_t echoes;
+        for (size_t i = 0; i + 4 <= text.length; ++i)
+            echoes += text[i .. i + 4] == ":put";
+        assert(echoes == 4);
+        session.show_prompt(false);
+        session.set_features(terminal_features(TerminalProfile.dumb));
+    }
 
     // output that has ended can still be abandoned, with the part the stream has not taken
     {
