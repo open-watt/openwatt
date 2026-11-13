@@ -959,7 +959,7 @@ nothrow @nogc:
         if (!ok)
         {
             free(img);
-            debug assert(false, "packed bucket failed to reconstitute");
+            debug assert(fetched.ptr, "packed bucket failed to reconstitute");
             return false;
         }
         mount_raw(b, img.ptr, offs_bytes, rec_bytes, irregular);
