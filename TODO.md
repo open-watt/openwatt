@@ -49,9 +49,6 @@ left in place they are dead weight whose reason is invisible in the code.
 - Let PPP/PPPoE servers target a bridge and create membership rows for accepted
   session interfaces. Use the shared bridge-port collection and dynamic endpoint
   cleanup rather than a separate membership path.
-- Fix the Windows empty-directory `get_temp_filename` contract in uRT; the native
-  console and uRT file unit tests fail creating their script files, including
-  outside the sandbox. WSL unit tests pass.
 - Complete bridge VLAN membership tables beyond per-port PVID configuration;
   non-PVID ingress with filtering and non-PVID egress currently drop.
 - Decide uRT's memory-flags contract for allocations that must remain accessible

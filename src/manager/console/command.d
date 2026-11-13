@@ -634,13 +634,15 @@ unittest
     else
     {
         import urt.file : get_temp_filename, save_file, delete_file;
-        import urt.mem.temp : tconcat;
+        import manager.base : append_config_value;
         char[256] buffer = void;
         char[] filename = buffer[];
         assert(get_temp_filename(filename, "", "owt"));
         scope(exit) filename.delete_file();
         assert(save_file(filename, ":put from-file"));
-        run_script(*console, tconcat(":run file=\"", filename, "\""), out_, r);
+        MutableString!0 cmd = ":run file=";
+        append_config_value(cmd, Variant(filename));
+        run_script(*console, cmd[], out_, r);
         assert(out_[] == "from-file\n");
     }
 
