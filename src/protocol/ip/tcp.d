@@ -17,7 +17,7 @@ import router.iface.endpoint;
 import router.iface.ethernet;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener;
+import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener, pseudo_header_checksum_v4;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
@@ -2003,19 +2003,6 @@ uint generate_iss()
 {
     MonoTime now = getTime();
     return cast(uint)(now.ticks >> 8) ^ 0xA3B75D17;
-}
-
-
-// IPv4 pseudo-header checksum: sum of src_addr, dst_addr, zero+protocol, transport_length.
-ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    ubyte[12] ph = void;
-    ph[0..4]   = src.b;
-    ph[4..8]   = dst.b;
-    ph[8]      = 0;
-    ph[9]      = protocol;
-    ph[10..12] = transport_length.nativeToBigEndian;
-    return internet_checksum(ph[]);
 }
 
 
