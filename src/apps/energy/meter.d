@@ -1,11 +1,13 @@
 module apps.energy.meter;
 
 import urt.si;
+import urt.time : getSysTime, SysTime;
 import urt.util : log2;
 
-import apps.energy.model : BusType, MeterSign, is_multi_phase;
+import apps.energy.model : BusType, MeterSign, is_multi_phase, reading_present;
 
 import manager.component;
+import manager.element : Element;
 
 nothrow @nogc:
 
@@ -387,6 +389,9 @@ MeterData extract_phase(ref const MeterData raw, BusType type, ubyte meter_phase
     return r;
 }
 
+double read_energy_counter(const(Element)* counter, SysTime now)
+    => reading_present(counter, now) ? counter.scaled_value!KilowattHour() : double.nan;
+
 MeterData get_port_meter_data(Component meter, ubyte meter_phase, MeterSign sign, FieldFlags fields = FieldFlags.all)
 {
     MeterData raw = get_meter_data(meter, fields);
@@ -412,52 +417,6 @@ void apply_meter_sign(ref MeterData data, MeterSign sign) pure
     swap_fields(data, MeterField.total_apparent_import, MeterField.total_apparent_export);
     swap_fields(data, MeterField.total_inductive, MeterField.total_capacitive);
     rebuild_field_flags(data);
-}
-
-unittest
-{
-    import manager.device : DeviceTable;
-    import manager.element : Element, register_value_format;
-
-    MeterData data;
-    data.reset_to_missing();
-    data.write_value(MeterField.power, 0, 123.0f);
-    data.mark(MeterField.power, 0, Provenance.measured);
-    data.write_value(MeterField.total_active, 0, 10.0f);
-    data.mark(MeterField.total_active, 0, Provenance.measured);
-    data.write_value(MeterField.total_import_active, 0, 10.0f);
-    data.mark(MeterField.total_import_active, 0, Provenance.measured);
-
-    apply_meter_sign(data, MeterSign.inverted);
-
-    assert(data.active[0].value == -123.0f);
-    assert(data.total_active[0] == -10.0f);
-    assert(!data.has(MeterField.total_import_active));
-    assert(data.has(MeterField.total_export_active));
-    assert(data.total_export_active[0] == 10.0f);
-    assert(!(data.fields & FieldFlags.total_import_active));
-    assert(data.fields & FieldFlags.total_export_active);
-
-    DeviceTable devices;
-    auto builder = devices.create("unseen-meter");
-    Component meter = builder.component("meter", "EnergyMeter");
-    Element* power = builder.element(meter, "power", register_value_format!MeterWatts());
-    builder.element(meter, "frequency", register_value_format!(Quantity!(float, Hertz))());
-    builder.element(meter, "import", register_value_format!(Quantity!(float, KilowattHour))());
-    static immutable string[4] quadrants = ["q1", "q2", "q3", "q4"];
-    foreach (name; quadrants)
-        builder.element(meter, name, register_value_format!float());
-
-    data = get_meter_data(meter);
-    assert(!data.has(MeterField.power));
-    assert(!data.has(MeterField.frequency));
-    assert(!data.has(MeterField.total_import_active));
-    assert(!data.has(MeterField.total_reactive));
-
-    power.value(MeterWatts(0));
-    data = get_meter_data(meter);
-    assert(data.source(MeterField.power) == Provenance.measured);
-    assert(data.active[0].value == 0);
 }
 
 static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all)
@@ -498,6 +457,7 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
     if (!meter)
         return r;
 
+    const now = getSysTime();
     float*[num_fields] f = [
         cast(float*)r.voltage.ptr,
         cast(float*)r.cross_phase_voltage.ptr,
@@ -526,6 +486,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
     // Track element-read provenance locally while synthesis mutates r.
     ubyte[num_fields] present;
 
+    const ubyte configured_phases = is_multi_phase(r.type) ? 0x0e :
+                                    (r.type == BusType.split_phase ? 0x06 : 0);
     bool need_calculate_system_pf;
     for (size_t i = 0, bit = 1; i < num_fields; ++i, bit <<= 1)
     {
@@ -535,7 +497,7 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         if (i == MeterField.frequency)
         {
             Element* e = meter.find_element(field_names[i]);
-            if (e && e.has_value)
+            if (reading_present(e, now))
             {
                 double v = e.scaled_value!Hertz();
                 if (v == v)
@@ -549,10 +511,13 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         }
 
         ubyte values_present = 0;
+        ubyte declared = 0;
         for (size_t j = 0; j < 4; ++j)
         {
             Element* e = meter.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j));
-            if (e && e.has_value)
+            if (e)
+                declared |= 1 << j;
+            if (reading_present(e, now))
             {
                 double v = is_active_energy_field(cast(MeterField)i)
                          ? e.scaled_value!KilowattHour()
@@ -578,9 +543,10 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
 
         if ((values_present & 1) == 0)
         {
+            const required_phases = configured_phases | (declared & 0x0e);
             if (i == MeterField.power_factor)
                 need_calculate_system_pf = true;
-            else
+            else if (hasAvg(i) || values_present == required_phases)
             {
                 int contrib = 0;
                 float sum = 0;
@@ -621,7 +587,7 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         foreach (n; 0..4)
         {
             Element* e = meter.find_element(q_names[n]);
-            if (e && e.has_value)
+            if (reading_present(e, now))
             {
                 double v = e.normalised_value();
                 if (v == v)
@@ -1062,4 +1028,131 @@ bool hasAvg(size_t field)
     if (field == MeterField.voltage || field == MeterField.inter_phase_voltage || field == MeterField.power_factor)
         return true;
     return false;
+}
+
+
+unittest
+{
+    import urt.mem : free;
+    import urt.time : seconds;
+
+    import manager.device : Device, DeviceTable;
+    import manager.element : Element, SamplingMode, register_value_format;
+
+    MeterData data;
+    data.reset_to_missing();
+    data.write_value(MeterField.power, 0, 123.0f);
+    data.mark(MeterField.power, 0, Provenance.measured);
+    data.write_value(MeterField.total_active, 0, 10.0f);
+    data.mark(MeterField.total_active, 0, Provenance.measured);
+    data.write_value(MeterField.total_import_active, 0, 10.0f);
+    data.mark(MeterField.total_import_active, 0, Provenance.measured);
+
+    apply_meter_sign(data, MeterSign.inverted);
+
+    assert(data.active[0].value == -123.0f);
+    assert(data.total_active[0] == -10.0f);
+    assert(!data.has(MeterField.total_import_active));
+    assert(data.has(MeterField.total_export_active));
+    assert(data.total_export_active[0] == 10.0f);
+    assert(!(data.fields & FieldFlags.total_import_active));
+    assert(data.fields & FieldFlags.total_export_active);
+
+    DeviceTable devices;
+    auto builder = devices.create("unseen-meter");
+    Device device = builder.device;
+    Component meter = builder.component("meter", "EnergyMeter");
+    Element* power = builder.element(meter, "power", register_value_format!MeterWatts());
+    alias MeterFrequency = Quantity!(float, Hertz);
+    Element* frequency = builder.element(meter, "frequency", register_value_format!MeterFrequency());
+    builder.element(meter, "import", register_value_format!(Quantity!(float, KilowattHour))());
+    static immutable string[4] quadrants = ["q1", "q2", "q3", "q4"];
+    Element*[4] reactive;
+    foreach (i, name; quadrants)
+    {
+        reactive[i] = builder.element(meter, name, register_value_format!float());
+        reactive[i].sampling_mode = SamplingMode.poll;
+    }
+    builder.commit();
+    scope(exit) free(device);
+
+    data = get_meter_data(meter);
+    assert(!data.has(MeterField.power));
+    assert(!data.has(MeterField.frequency));
+    assert(!data.has(MeterField.total_import_active));
+    assert(!data.has(MeterField.total_reactive));
+
+    power.sampling_mode = SamplingMode.poll;
+    frequency.sampling_mode = SamplingMode.poll;
+    const stale = getSysTime() - seconds(300);
+    power.value(MeterWatts(123), stale);
+    frequency.value(MeterFrequency(50), stale);
+    foreach (e; reactive)
+        e.value(10.0f, stale);
+
+    int source;
+    device.set_online(&source, false);
+    assert(!get_meter_data(meter).has(MeterField.power));
+    device.set_online(&source, true);
+    data = get_meter_data(meter);
+    assert(!data.has(MeterField.power));
+    assert(!data.has(MeterField.frequency));
+    assert(!data.has(MeterField.total_reactive));
+
+    power.value(MeterWatts(0));
+    frequency.value(MeterFrequency(50));
+    foreach (e; reactive)
+        e.value(10.0f);
+    data = get_meter_data(meter);
+    assert(data.has(MeterField.frequency));
+    assert(data.source(MeterField.total_reactive) == Provenance.quadrant_derived);
+    assert(data.source(MeterField.power) == Provenance.measured);
+    assert(data.active[0].value == 0);
+
+    builder = device.edit();
+    Element* type = builder.element(meter, "type", register_value_format!string());
+    type.value("three-phase");
+    Element* power1 = builder.element(meter, "power1", register_value_format!MeterWatts());
+    Element* power2 = builder.element(meter, "power2", register_value_format!MeterWatts());
+    Element* power3 = builder.element(meter, "power3", register_value_format!MeterWatts());
+    builder.commit();
+    power.last_update = stale;
+    power1.value(MeterWatts(10));
+    power2.sampling_mode = SamplingMode.poll;
+    power2.value(MeterWatts(20), stale);
+    power3.value(MeterWatts(30));
+
+    data = get_meter_data(meter);
+    assert(!data.has(MeterField.power));
+    assert(data.is_measured(MeterField.power, 1) && data.active[1].value == 10);
+    assert(data.is_measured(MeterField.power, 3) && data.active[3].value == 30);
+    power.value(MeterWatts(900));
+    assert(get_meter_data(meter).active[0].value == 900);
+
+    power.last_update = stale;
+    power2.value(MeterWatts(20));
+    data = get_meter_data(meter);
+    assert(data.source(MeterField.power) == Provenance.synthesized && data.active[0].value == 60);
+
+    builder = device.edit();
+    Element* apparent1 = builder.element(meter, "apparent1", register_value_format!float());
+    Element* voltage1 = builder.element(meter, "voltage1", register_value_format!MeterVolts());
+    Element* voltage2 = builder.element(meter, "voltage2", register_value_format!MeterVolts());
+    builder.commit();
+    apparent1.value(55.0f);
+    voltage1.value(MeterVolts(230));
+    voltage2.sampling_mode = SamplingMode.poll;
+    voltage2.value(MeterVolts(240), stale);
+
+    data = get_meter_data(meter);
+    assert(!data.has(MeterField.apparent));
+    assert(data.is_measured(MeterField.apparent, 1) && data.apparent[1] == 55);
+    assert(data.source(MeterField.voltage) == Provenance.synthesized && data.voltage[0].value == 230);
+
+    type.value("single-phase");
+    power1.sampling_mode = SamplingMode.poll;
+    power1.last_update = stale;
+    power.value(MeterWatts(900));
+    data = get_meter_data(meter);
+    assert(data.source(MeterField.power, 1) == Provenance.synthesized && data.active[1].value == 900);
 }

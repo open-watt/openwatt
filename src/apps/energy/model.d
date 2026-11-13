@@ -1,11 +1,29 @@
 module apps.energy.model;
 
 import urt.si.unit : ScaledUnit;
-import urt.time : getSysTime, SysTime;
+import urt.time : getSysTime, seconds, SysTime;
 
+import manager.device : Device, OnlineStatus;
 import manager.element;
 
 nothrow @nogc:
+
+
+private enum poll_reading_max_age = seconds(180);
+
+bool reading_present(const(Element)* e, SysTime now)
+{
+    if (e is null || !e.has_value)
+        return false;
+
+    SamplingMode mode = e.sampling_mode;
+    if (mode == SamplingMode.constant || mode == SamplingMode.config)
+        return true;
+
+    const(Device) device = e.parent ? e.parent.root_device() : null;
+    return (!device || device.online_status != OnlineStatus.offline) &&
+           (mode != SamplingMode.poll || now - e.last_update <= poll_reading_max_age);
+}
 
 
 // Convert through quantity metadata because raw magnitudes can differ by scale
@@ -151,8 +169,10 @@ unittest
     import urt.si.quantity : Quantity;
     import urt.si.unit : Ampere, AmpereHour, Celsius, Percent, ScaledUnit, Volt;
     import urt.string : StringLit;
+    import urt.time : from_unix_time_ns, msecs;
     import urt.variant : Variant;
 
+    import manager.device : DeviceTable;
     import manager.series : DataFormat, SeriesKind, ValueType, register_format;
 
     static Element* elem(double value, ScaledUnit unit)
@@ -199,4 +219,34 @@ unittest
     typed.format = register_value_format!(Quantity!(double, Percent))();
     typed.value = Variant(Quantity!(double, Percent)(50));
     assert(near(read_in_unit(typed, Percent), 50));
+
+    DeviceTable devices;
+    auto builder = devices.create("freshness");
+    Device device = builder.device;
+    Element* reading = builder.element("meter.power", register_value_format!float());
+    builder.commit();
+    scope(exit) free(device);
+
+    SysTime sample = from_unix_time_ns(1_000_000_000);
+    reading.sampling_mode = SamplingMode.poll;
+    assert(!reading_present(null, sample));
+    assert(!reading_present(reading, sample));
+    reading.value(0.0f, sample);
+    assert(reading_present(reading, sample + seconds(179)));
+    assert(reading_present(reading, sample + seconds(180)));
+    assert(!reading_present(reading, sample + seconds(180) + msecs(1)));
+
+    int source;
+    device.set_online(&source, false);
+    assert(!reading_present(reading, sample));
+    reading.sampling_mode = SamplingMode.report;
+    assert(!reading_present(reading, sample));
+    device.set_online(&source, true);
+    assert(reading_present(reading, sample + seconds(3600)));
+
+    device.set_online(&source, false);
+    reading.sampling_mode = SamplingMode.constant;
+    assert(reading_present(reading, sample + seconds(3600)));
+    reading.sampling_mode = SamplingMode.config;
+    assert(reading_present(reading, sample + seconds(3600)));
 }

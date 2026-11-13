@@ -238,39 +238,20 @@ struct BoundaryFlow
     float power_out_of_graph = 0;
 }
 
-// Corrected cumulative counters for one boundary, with the Element keys that
-// accounts use for reset-safe daily deltas. Counter direction follows
-// boundary shape: a dangling port's import counts into the graph.
-struct BoundaryEnergy
+Element* port_counter_element(Port* port, bool importing)
 {
-    Element* into_key;
-    Element* out_key;
-    double into_total = double.nan;
-    double out_total = double.nan;
-}
-
-BoundaryEnergy boundary_energy(Port* p)
-{
-    BoundaryEnergy e;
-    if (p is null || p.meter is null)
-        return e;
-    Element* import_e = p.meter.find_element("import");
-    Element* export_e = p.meter.find_element("export");
-    if (external_boundary(p))
-    {
-        e.into_key = import_e;
-        e.out_key = export_e;
-        e.into_total = p.meter_data.total_import_active[0];
-        e.out_total = p.meter_data.total_export_active[0];
-    }
-    else
-    {
-        e.into_key = export_e;
-        e.out_key = import_e;
-        e.into_total = p.meter_data.total_export_active[0];
-        e.out_total = p.meter_data.total_import_active[0];
-    }
-    return e;
+    if (!port.meter)
+        return null;
+    const(char)[] field = importing != (port.meter_sign == MeterSign.inverted) ? "import" : "export";
+    if (port.meter_phase == 0)
+        return port.meter.find_element(field);
+    char[7] name;
+    name[0 .. 6] = field[];
+    name[6] = cast(char)('0' + port.meter_phase);
+    Element* counter = port.meter.find_element(name[]);
+    if (!counter && port.meter_phase == 1 && get_meter_type(port.meter) == BusType.single_phase)
+        counter = port.meter.find_element(field);
+    return counter;
 }
 
 // Stable presentation key for a boundary: the group's declared name when it
@@ -1530,7 +1511,7 @@ private:
             member.group = retain_production_string(group);
             member.port = p;
             member.kind = ProductionContributionKind.member;
-            member.import_counter = port_import_counter(p);
+            member.import_counter = port_counter_element(p, true);
             member.meter = p.meter_data;
             if (member.meter.has(MeterField.power))
             {
@@ -1548,19 +1529,6 @@ private:
         }
 
         reconcile_productions(production_contributions, productions);
-    }
-
-    Element* port_import_counter(Port* port)
-    {
-        if (!port.meter)
-            return null;
-        const(char)[] field = port.meter_sign == MeterSign.inverted ? "export" : "import";
-        if (port.meter_phase == 0)
-            return port.meter.find_element(field);
-        char[7] name;
-        name[0 .. 6] = field[];
-        name[6] = cast(char)('0' + port.meter_phase);
-        return port.meter.find_element(name[]);
     }
 
     void add_production_aggregate_once(Appliance owner, const(char)[] group)
@@ -1810,7 +1778,7 @@ unittest
         Component selected_meter = builder.component("selected_meter", "EnergyMeter");
         auto format = register_value_format!float();
         builder.element(local_meter, "export2", format);
-        builder.element(selected_meter, "export", format);
+        Element* system_export = builder.element(selected_meter, "export", format);
         Element* phase_import = builder.element(selected_meter, "import2", format);
         Element* phase_export = builder.element(selected_meter, "export2", format);
         Bus* site = graph.ensure_bus("site");
@@ -1828,6 +1796,13 @@ unittest
         solar.meter_phase = 1;
         graph.rebuild_productions();
         assert(graph.production_contributions[0].import_counter is null);
+
+        builder.element(selected_meter, "type", register_value_format!string()).value("single-phase");
+        graph.rebuild_productions();
+        assert(graph.production_contributions[0].import_counter is system_export);
+        Element* phase1_export = builder.element(selected_meter, "export1", format);
+        graph.rebuild_productions();
+        assert(graph.production_contributions[0].import_counter is phase1_export && !phase1_export.has_value);
         graph.clear();
     }
 
