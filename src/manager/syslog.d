@@ -84,3 +84,23 @@ Severity from_syslog_severity(uint pri)
 
 bool is_nil(const(char)[] field)
     => field.length == 1 && field[0] == '-';
+
+unittest
+{
+    SysTime timestamp;
+    assert(timestamp.fromString("2026-11-11T12:34:56.123456Z") >= 0);
+    foreach (severity; [Severity.emergency, Severity.alert, Severity.critical, Severity.error,
+                       Severity.warning, Severity.notice, Severity.info, Severity.debug_, Severity.trace])
+    {
+        LogMessage original = LogMessage(severity, "mqtt", "client1", "message with spaces", "router", timestamp);
+        LogMessage parsed;
+        assert(parse_syslog(format_syslog(original), parsed));
+        assert(parsed == original);
+    }
+
+    LogMessage original;
+    original.message = "";
+    LogMessage parsed;
+    assert(parse_syslog(format_syslog(original), parsed));
+    assert(parsed == original);
+}
