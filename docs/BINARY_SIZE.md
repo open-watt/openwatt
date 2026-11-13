@@ -57,6 +57,13 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 
 ## Configurations
 
+### x86_64 Windows, `make COMPILER=ldc CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | matched DHCP validation baseline |
+| 2026-11-11 | 81493431 | ldc 1.43.0 | 3,887,132 | 120,824 | - | #947 validated DHCP/UDP ingress and shared IPv4 checksum; +2,860 B, RAM unchanged |
+
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
@@ -199,6 +206,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-08 | #931 | ldc 1.43.0 | 1,609,548 | 46,412 | 4,194,304 | EZSP requests queue in pool packets; a non-reentrant drain keeps wire order: +256 flash |
 | 2026-11-08 | c6e93df0 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | master, control for #924 |
 | 2026-11-08 | #924 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | headroom-shortfall warnings, debug builds only: no release bytes |
+| 2026-11-10 | #947 (81493431) | ldc 1.43.0 | 1,602,076 | 46,424 | 4,194,304 | matched CI; +80 B vs 8a145cbd, RAM unchanged |
+
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
