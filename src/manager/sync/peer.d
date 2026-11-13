@@ -1,7 +1,6 @@
 module manager.sync.peer;
 
 import urt.array;
-import urt.endian : nativeToLittleEndian;
 import urt.inet;
 import urt.lifetime : move;
 import urt.log;
@@ -19,7 +18,7 @@ import manager.collection;
 import manager.console.session : Session;
 import manager.device : Device, DeviceBuilder, DeviceTable;
 import manager.element : Access, Element;
-import manager.features : is_tiny;
+import manager.features : has_rdp, is_tiny;
 import manager.id : EID;
 import manager.log;
 import manager.series : FormatId;
@@ -32,10 +31,12 @@ import manager.sync.encoder;
 import manager.sync.peering : SyncPeeringModule;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
+import router.iface.endpoint : UDPReceiveInfo;
 import router.iface.packet;
-import router.iface.udp : UDPFrame;
 import router.stream : max_tx_page;
+
+static if (has_rdp)
+    import router.iface.rdp;
 
 nothrow @nogc:
 
@@ -59,12 +60,12 @@ enum SyncCaps : ubyte
 
 enum ubyte local_sync_caps = SyncCaps.objects | SyncCaps.model | SyncCaps.console | SyncCaps.logs | SyncCaps.time | SyncCaps.console_session | SyncCaps.templates;
 
-// reliability sublayer classification; values are the wire kind byte
+// a refused control frame ends the session; a refused val or log is backpressure its producer keeps
 enum TxQueue : ubyte
 {
-    control = 0,
-    val     = 1,
-    log     = 2,
+    control,
+    val,
+    log,
 }
 
 
@@ -91,24 +92,22 @@ nothrow @nogc:
     ~this()
     {
         detach_transport();
-        close_udp_endpoint();
+        close_rdp();
     }
 
     // Properties
 
     final inout(BaseInterface) transport() inout pure
-        => uses_udp_endpoint ? null : _transport.get;
+        => uses_rdp ? null : _transport.get;
     final void transport(BaseInterface value)
     {
-        if (!uses_udp_endpoint && _transport is value)
+        if (!uses_rdp && _transport is value)
             return;
         detach_transport();
-        close_udp_endpoint();
-        _peer_flags &= ~(PeerFlags.uses_udp_endpoint | PeerFlags.owns_udp_endpoint);
+        close_rdp();
+        _peer_flags &= ~(PeerFlags.uses_rdp | PeerFlags.owns_rdp);
         _transport = value;
         _remote = InetAddress();
-        _peer_flags &= ~PeerFlags.remote_bound;
-        _remote_addr = InetAddress();
         mark_set!(typeof(this), [ "transport", "remote" ])();
         restart();
     }
@@ -117,21 +116,24 @@ nothrow @nogc:
         => _remote;
     final const(char)[] remote(InetAddress value)
     {
-        if (value.family == AddressFamily.unspecified || value.addr_any || value.port == 0)
-            return "remote needs a non-wildcard address and port";
-        if (uses_udp_endpoint && owns_udp_endpoint && value == _remote)
-            return null;
+        static if (!has_rdp)
+            return "this build has no RDP sessions";
+        else
+        {
+            if (value.family == AddressFamily.unspecified || value.addr_any || value.port == 0)
+                return "remote needs a non-wildcard address and port";
+            if (uses_rdp && owns_rdp && value == _remote)
+                return null;
 
-        detach_transport();
-        close_udp_endpoint();
-        _transport = null;
-        _peer_flags |= PeerFlags.uses_udp_endpoint | PeerFlags.owns_udp_endpoint;
-        _remote = value;
-        _peer_flags &= ~PeerFlags.remote_bound;
-        _remote_addr = InetAddress();
-        mark_set!(typeof(this), [ "transport", "remote" ])();
-        restart();
-        return null;
+            detach_transport();
+            close_rdp();
+            _transport = null;
+            _peer_flags |= PeerFlags.uses_rdp | PeerFlags.owns_rdp;
+            _remote = value;
+            mark_set!(typeof(this), [ "transport", "remote" ])();
+            restart();
+            return null;
+        }
     }
 
     final SyncEncoderKind encoder() const pure
@@ -168,54 +170,49 @@ nothrow @nogc:
         restart();
     }
 
-    final void bind_remote(ref const InetAddress addr)
+    static if (has_rdp)
     {
-        _remote_addr = addr;
-        _peer_flags |= PeerFlags.remote_bound;
+        // a dialled endpoint, opened with this peer's handlers; the peer owns it from here
+        final package void adopt_rdp(RDPEndpoint* endpoint, ref const InetAddress remote)
+        {
+            this.remote(remote);
+            _rdp = endpoint;
+        }
+
+        // one session of a server's listening endpoint, which the server owns
+        final package void bind_rdp_session(RDPEndpoint* endpoint, ref const InetAddress remote)
+        {
+            assert(endpoint);
+            detach_transport();
+            close_rdp();
+            _peer_flags |= PeerFlags.uses_rdp;
+            _peer_flags &= ~PeerFlags.owns_rdp;
+            _rdp = endpoint;
+            _remote = remote;
+        }
+
+        final package void on_rdp_message(RDPEndpoint*, const(void)[] message, PCP, ref UDPReceiveInfo)
+        {
+            deliver_frame(cast(const(ubyte)[])message);
+        }
+
+        final package void on_rdp_event(RDPEndpoint*, ref const InetAddress, RDPEvent event)
+        {
+            if (event == RDPEvent.writable)
+                arm_tx();
+            else if (event == RDPEvent.closed && running)
+                restart();
+        }
     }
 
-    final package void adopt_udp_endpoint(UDPEndpoint* endpoint)
-    {
-        remote(endpoint.remote);
-        _udp_endpoint = endpoint;
-    }
-
-    final package void bind_udp_endpoint(UDPEndpoint* endpoint, ref const InetAddress remote)
-    {
-        assert(endpoint);
-        detach_transport();
-        close_udp_endpoint();
-        _peer_flags |= PeerFlags.uses_udp_endpoint;
-        _peer_flags &= ~(PeerFlags.owns_udp_endpoint | PeerFlags.remote_bound);
-        _udp_endpoint = endpoint;
-        _remote = remote;
-        _remote_addr = InetAddress();
-    }
-
-    // Unreliable links wrap every frame with source/destination sessions and a kind.
-    // Control uses ordered retransmission; val and log queues refold unacknowledged
-    // records. Eviction bumps a durable queue epoch so the receiver declares the gap
-    // and re-bases. Destination-session matching prevents stale streams from delivering
-    // or acknowledging frames. Reliable, ordered transports skip this sublayer.
-
-    // the largest sync frame one packet carries from here: the transport's limit less the carrier and the sublayer
+    // the largest sync frame one message carries from here
     final uint local_segment()
     {
-        import router.iface.udp : udp_carrier_ether, udp_carrier_v4, udp_carrier_v6;
-
-        uint link;
-        if (uses_udp_endpoint)
-        {
-            uint carrier = _remote.family == AddressFamily.ipv6 ? udp_carrier_v6 : _remote.family == AddressFamily.ether ? udp_carrier_ether : udp_carrier_v4;
-            // a host stack routes for itself and names no egress; assume no more than the IPv6 minimum link
-            BaseInterface egress = _udp_endpoint ? _udp_endpoint.egress_iface(_remote) : null;
-            uint mtu = egress ? egress.actual_mtu : 1280;
-            link = mtu > carrier ? mtu - carrier : 0;
-        }
-        else if (BaseInterface transport = _transport)
-            link = transport.actual_mtu;
-        uint overhead = sublayer_armed ? sublayer_overhead : 0;
-        return link > overhead ? link - overhead : 0;
+        static if (has_rdp)
+            if (uses_rdp)
+                return _rdp ? _rdp.message_limit(_remote) : rdp_max_message;
+        BaseInterface transport = _transport;
+        return transport ? transport.actual_mtu : 0;
     }
 
     // what this side reassembles from fragments, never less than one segment
@@ -240,9 +237,10 @@ nothrow @nogc:
     final uint max_message(bool is_text)
         => is_text || !_remote_max_message ? send_limit : _remote_max_message;
 
+    // a value bundle goes ahead of the control frame that may cite its handles; a log bundle has its own lane
     final int transmit_frame(const(ubyte)[] frame, bool is_text = false, TxQueue queue = TxQueue.control)
     {
-        if (queue == TxQueue.control && transport_ready && flush_bundle() < 0)
+        if (queue == TxQueue.control && transport_ready && _bundle_queue != TxQueue.log && flush_bundle(true) < 0)
             return refused(true);
         return transmit_unbundled(frame, is_text, queue);
     }
@@ -255,47 +253,34 @@ nothrow @nogc:
             _send_failed = true;
             return -1;
         }
-        // refusals come before a frame is sequenced, so neither the session nor a burst fails with them
+        // refusals come before a frame is sent, so neither the session nor a burst fails with them
+        if (queue != TxQueue.control && !control_room())
+            return -1;
+        if (_frag_tx.length && queue != TxQueue.log)
+        {
+            // the model lane is ordered behind the train; values wait in their producers
+            if (queue == TxQueue.val || frame.length > max_message(is_text))
+                return -1;
+            size_t held_bytes = frame.length;
+            foreach (ref h; _frag_hold[])
+                held_bytes += h.length;
+            if (_frag_hold.length >= frag_hold_max || held_bytes > frag_hold_max_bytes)
+                return refused(true);
+            Array!ubyte held;
+            held ~= frame[];
+            _frag_hold ~= held.move;
+            return 0;
+        }
         if (frame.length > send_limit)
         {
-            // the control plane carries it as fragments, toward a remote that reads them, one message at a time
+            // the model lane carries it as fragments, toward a remote that reads them, one message at a time
             if (_frag_tx.length || frame.length > max_message(is_text))
                 return -1;
             start_fragments(frame);
             return 0;
         }
-        if (queue == TxQueue.control && _frag_tx.length)
-            return -1;
-        if (!sublayer_armed)
-            return send_unwrapped(frame, is_text, queue == TxQueue.control);
-        if (queue == TxQueue.control)
-            return send_sequenced(frame);
-
-        DataQueue* q = &_queues[queue - 1];
-        DataEntry e;
-        e.id = ++q.tx_id;
-        e.first = getTime();
-        e.payload ~= frame[];
-        q.bytes += frame.length;
-        q.backlog ~= e.move;
-        // An acknowledged epoch starts a new declared gap; an unacknowledged epoch
-        // absorbs later evictions so it never outruns the receiver by more than one.
-        bool fresh_cycle = q.evicted == 0;
-        bool evicted;
-        while (q.backlog.length > 1 && (q.backlog.length > backlog_max_frames || q.bytes > backlog_limit))
-        {
-            q.bytes -= q.backlog[0].payload.length;
-            q.backlog.remove(0);
-            ++q.evicted;
-            evicted = true;
-        }
-        if (evicted && (fresh_cycle || q.epoch_acked))
-        {
-            ++q.tx_epoch;
-            q.epoch_acked = false;
-        }
-        send_data_frame(queue);
-        return 0;
+        int r = raw_tx(frame, is_text, queue);
+        return r < 0 ? refused(queue == TxQueue.control) : r;
     }
 
     // Session name/handle binding. Local ids never travel: each side announces its
@@ -370,12 +355,6 @@ nothrow @nogc:
             return idx < _introduced.length ? _introduced[idx] : EID.invalid;
         return idx < _adopted.length ? _adopted[idx] : EID.invalid;
     }
-
-    // handles are announced in ascending order over the reliable in-order control
-    // plane, so anything below the high-water mark has had its add delivered (even
-    // if the node failed to materialise); anything above is still in flight
-    final bool handle_announced(SyncHandle handle) const pure
-        => (handle >> 1) < ((handle & 1) ? _introduced.length : _adopted.length);
 
     // legacy object-mirror accessor; dissolves with the mirror verbs
     final CID cid_of(SyncHandle handle)
@@ -485,7 +464,7 @@ nothrow @nogc:
 protected:
 
     override bool validate() const pure
-        => uses_udp_endpoint || _transport !is null;
+        => uses_rdp || _transport !is null;
 
     // Idempotent; WS-spawned peers call this at accept time, because the client's
     // first frames can arrive before our first startup tick and unsubscribed
@@ -493,26 +472,30 @@ protected:
     // destroyed or the peer stops.
     final package void subscribe_transport()
     {
-        if (uses_udp_endpoint || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
+        if (uses_rdp || (_peer_flags & PeerFlags.transport_subscribed) || !_transport)
             return;
         _transport.subscribe(&on_transport_state);
-        // a remote-bound peer shares a multi-drop transport: its server routes rx by source
-        // (deliver_frame). the interface holds few subscriber slots, so per-peer packet
-        // subscriptions must not scale with peers.
         // unknown = all types; the handler takes raw and udp frames, so one peer object
         // sits on connected pipes and datagram transports alike
-        if (!(_peer_flags & PeerFlags.remote_bound))
-            _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.unknown, PacketDirection.incoming));
         _peer_flags |= PeerFlags.transport_subscribed;
     }
 
     override CompletionStatus startup()
     {
-        if (owns_udp_endpoint && !_udp_endpoint && !create_remote_endpoint())
-            return CompletionStatus.error;
+        static if (has_rdp)
+            if (owns_rdp && !_rdp && !open_rdp())
+                return CompletionStatus.error;
         subscribe_transport();
         if (!transport_ready)
             return CompletionStatus.continue_;
+
+        enum promised = InterfaceCaps.reliable | InterfaceCaps.ordered;
+        if (!uses_rdp && (_transport.caps & promised) != promised)
+        {
+            log.error("peer '", name[], "': transport '", _transport.name[], "' is not reliable and ordered; use remote= for a session over it");
+            return CompletionStatus.error;
+        }
 
         if (_pre_start_overflow)
         {
@@ -577,96 +560,21 @@ protected:
         if (_state == State.stopping || _state == State.destroying)
         {
             detach_transport();
-            close_udp_endpoint();
+            close_rdp();
         }
         else
+        {
             _tx_waiter.cancel();
+            // the RDP session ends with this one, so the remote rebuilds too; a dialled endpoint reopens itself
+            static if (has_rdp)
+                if (owns_rdp && _rdp && _rdp.established(_remote))
+                    _rdp.close_session(_remote);
+        }
 
         // Peer-derived tap state dies with the stream; the desire to receive
         // (_want_*) persists so a reconnect re-subscribes.
         clear_log_sink();
         return CompletionStatus.complete;
-    }
-
-    override void update()
-    {
-        if (!transport_ready || !sublayer_armed)
-            return;
-
-        MonoTime now = getTime();
-        foreach (ref s; _resend[])
-        {
-            if (now - s.sent < msecs(retransmit_ms << s.tries))
-                continue;
-            if (++s.tries > max_retries)
-            {
-                log.warning("peer '", name[], "' control frames unacknowledged; restarting session");
-                restart();
-                return;
-            }
-            s.sent = now;
-            raw_tx(s.bytes[], false);
-        }
-
-        foreach (i, ref q; _queues)
-        {
-            bool fresh_cycle = q.evicted == 0;
-            bool evicted;
-            while (!q.backlog.empty && now - q.backlog[0].first > msecs(backlog_ttl_ms))
-            {
-                log.debug_("peer '", name[], "' aged out an unacked data frame");
-                q.bytes -= q.backlog[0].payload.length;
-                q.backlog.remove(0);
-                ++q.evicted;
-                evicted = true;
-            }
-            if (evicted && (fresh_cycle || q.epoch_acked))
-            {
-                ++q.tx_epoch;
-                q.epoch_acked = false;
-            }
-            // an un-acked bump with nothing left to refold still needs announcing:
-            // an empty frame carries the epoch until the receiver acks it
-            if ((!q.backlog.empty || (q.evicted && !q.epoch_acked)) && now - q.last_tx >= msecs(data_flush_ms))
-                send_data_frame(cast(TxQueue)(i + 1), true);
-            // ageing freed room no ack will announce
-            if (evicted)
-                arm_tx();
-        }
-
-        ref DataQueue lq = _queues[TxQueue.log - 1];
-        if (lq.evicted && lq.backlog.empty && lq.epoch_acked)
-        {
-            // the receiver stands on the bumped epoch: the repair can go out;
-            // cleared first, the marker itself rides the log queue
-            uint lost = lq.evicted;
-            lq.evicted = 0;
-            encoder_for(_encoder).encode_log(this, tconcat("[sync: ", lost, " log lines lost]"));
-        }
-
-        if ((_peer_flags & PeerFlags.ctl_ack_pending) || _queues[0].ack_pending || _queues[1].ack_pending)
-        {
-            begin_header(wire_ack);
-            _rel_buf ~= _rx_delivered;
-            _rel_buf ~= _queues[0].rx_epoch;
-            _rel_buf ~= _queues[0].rx_seen;
-            _rel_buf ~= _queues[1].rx_epoch;
-            _rel_buf ~= _queues[1].rx_seen;
-            _peer_flags &= ~PeerFlags.ctl_ack_pending;
-            _queues[0].ack_pending = false;
-            _queues[1].ack_pending = false;
-            raw_tx(_rel_buf[], false);
-        }
-    }
-
-    // Wait for the peer to acknowledge the gap before re-pushing current live values.
-    final package bool take_val_repush()
-    {
-        ref DataQueue q = _queues[TxQueue.val - 1];
-        if (!q.evicted || !q.backlog.empty || !q.epoch_acked)
-            return false;
-        q.evicted = 0;
-        return true;
     }
 
 package:
@@ -797,26 +705,22 @@ package:
 
     enum max_warned_names = 16;
 
-    // bulk walks stop short of the window's end so the session's other control frames always find room
-    enum control_reserve = 16;
-
-    final bool control_starved()
-        => sublayer_armed && _resend.length + control_reserve >= max_unacked;
-
+    // producers stop at bulk's floor, so the session's control frames always find room above it
     final bool control_room()
-        => !control_starved() && (uses_udp_endpoint || _transport.tx_ready);
-
-    // a bulk producer waits for the val backlog to take one more segment rather than evict
-    final bool val_room()
-        => !sublayer_armed || (_queues[TxQueue.val - 1].backlog.length < backlog_max_frames && _queues[TxQueue.val - 1].bytes + send_limit <= backlog_limit);
+    {
+        static if (has_rdp)
+            if (uses_rdp)
+                return _rdp && _rdp.tx_ready(_remote, PCP.be);
+        return _transport.tx_ready;
+    }
 
     // a pending fragmented message holds the control plane until its last fragment is submitted
     final bool tx_blocked()
         => _frag_tx.length != 0 || bundle_kept() || !control_room();
 
-    // Transport readiness re-invites; control-window starvation waits for an ACK.
+    // the transport re-invites the producer once it has room again
     final bool tx_full()
-        => bundle_kept() || (!control_starved() && !uses_udp_endpoint && !_transport.tx_ready);
+        => bundle_kept() || !control_room();
 
     // a bundle the transport refused waits, closed, for the room that re-invites the producer
     final bool bundle_kept() const pure
@@ -854,7 +758,8 @@ package:
         return 0;
     }
 
-    final int flush_bundle()
+    // ahead of control, the bundle takes control's admission, as it must go first
+    final int flush_bundle(bool ahead_of_control = false)
     {
         if (!_bundle.length)
             return 0;
@@ -862,7 +767,7 @@ package:
         if (json && !(_peer_flags & PeerFlags.bundle_closed))
             _bundle ~= cast(ubyte)']';
         _peer_flags |= PeerFlags.bundle_closed;
-        int r = transmit_unbundled(_bundle[], json, _bundle_queue);
+        int r = transmit_unbundled(_bundle[], json, ahead_of_control ? TxQueue.control : _bundle_queue);
         if (r == 0)
         {
             _bundle.clear();
@@ -915,10 +820,10 @@ package:
     {
         if ((_peer_flags & PeerFlags.tx_producing) || !transport_ready)
             return;
-        if (uses_udp_endpoint)
-            produce_tx(null);
-        else
+        if (!uses_rdp)
             _transport.wait_tx(_tx_waiter);
+        else if (control_room())
+            _tx_waiter.handler(null);
     }
 
     // burst protocol: begin_burst, send, check send_ok after every send; refusal or teardown ends it
@@ -935,11 +840,15 @@ package:
 
     uint             _intro_table;
     uint             _intro_slot;
+    uint             _bind_table;
+    uint             _bind_slot;
+    uint             _unbind_cursor;    // bound objects below it are yet to be checked against the subscriptions
     bool             _introducing;
+    bool             _binding;          // a subscription's binds are still being walked
     Array!(Array!ubyte) _pre_start;      // frames held until the session can process them
     uint             _pre_start_bytes;
     bool             _pre_start_overflow;
-    enum pre_start_max = max_unacked;
+    enum pre_start_max = 64;
     enum pre_start_max_bytes = 64 * 1024;
     bool             _send_failed;
     uint             _session_gen;       // bumped by detach_peer; a burst spanning it is dead
@@ -1025,230 +934,56 @@ private:
         mark_set!(typeof(this), "time-authority")();
     }
 
-    enum retransmit_ms = 250;
-    enum max_retries = 8;
-    enum max_unacked = 64;
-    enum reorder_cap = 16;
-    enum reorder_span = 32;
-    enum backlog_max_frames = 32;
     enum uint reassembly_budget = is_tiny ? 8 * 1024 : ushort.max;
     enum ubyte fragment_first = 1 << 0;
     enum ubyte fragment_more = 1 << 1;
-    // a data frame's header (sessions, kind, epochs and base) and one record's id and length; control's is smaller
-    enum sublayer_overhead = 9 + 4 + 3;
-    enum backlog_max_bytes = 1024;
-    enum data_flush_ms = 300;
-    // the retransmit schedule's full span: doubling intervals through max_retries
-    // sends, plus the final wait before the session is declared dead
-    enum control_horizon_ms = retransmit_ms * ((1 << (max_retries + 1)) - 1);
-    // derived, not hand-picked: aging out a val whose add is still legitimately
-    // retrying is real data loss, so the ttl must outlast any control-plane repair;
-    // it exists only to unstick a poison orphan (add then destroy)
-    enum backlog_ttl_ms = control_horizon_ms + 10_000;
+    enum frag_hold_max = 16;
+    enum frag_hold_max_bytes = 4096;
+    // control and values share a lane, so a val never overtakes its add; logs stand aside on a bulk lane
+    enum model_lane = PCP.ca;
+    enum log_lane = PCP.bk;
 
-    enum ubyte wire_ack = 3;   // TxQueue values are the other kind bytes
-
-    @bitfield enum PeerFlags : ushort
+    @bitfield enum PeerFlags : ubyte
     {
-        none                       = 0,
-        transport_subscribed       = 1 << 0,
-        remote_bound               = 1 << 2,
-        ctl_ack_pending            = 1 << 3,
-        uses_udp_endpoint          = 1 << 4,
-        owns_udp_endpoint          = 1 << 5,
-        tx_producing               = 1 << 6,
-        claims                     = 1 << 7,
-        in_session                 = 1 << 8,
-        bundle_closed              = 1 << 9,
-    }
-
-    struct SentFrame
-    {
-        ubyte seq;
-        ubyte tries;
-        MonoTime sent;
-        Array!ubyte bytes;   // full wire frame, header included; retransmit is a straight resend
-    }
-    struct HeldFrame
-    {
-        ubyte seq;
-        Array!ubyte payload;
-    }
-    struct DataEntry
-    {
-        ubyte id;
-        MonoTime first;
-        Array!ubyte payload;
-    }
-    struct DataQueue
-    {
-        ubyte tx_id;         // last id assigned
-        ubyte tx_epoch;      // bumped when an unacked entry is evicted: declared discontinuity
-        ubyte rx_seen;       // watermark: last record accepted from the peer
-        ubyte rx_epoch;      // the peer stream epoch the watermark belongs to
-        bool  epoch_acked;   // the receiver has acked tx_epoch; gates repair and further bumps
-        bool  ack_pending;
-        ubyte tx_sent;       // last id a frame has carried
-        uint  evicted;       // entries lost since the last repair (repush / lost marker)
-        MonoTime last_tx;
-        size_t bytes;
-        Array!DataEntry backlog;   // unacked payloads, oldest first; every send refolds those one segment holds
+        none                 = 0,
+        transport_subscribed = 1 << 0,
+        uses_rdp             = 1 << 1,
+        owns_rdp             = 1 << 2,
+        tx_producing         = 1 << 3,
+        claims               = 1 << 4,
+        in_session           = 1 << 5,
+        bundle_closed        = 1 << 6,
     }
 
     union
     {
         ObjectRef!BaseInterface _transport;
-        UDPEndpoint* _udp_endpoint;
+        static if (has_rdp)
+            RDPEndpoint* _rdp;
     }
     TxWaiter                _tx_waiter;
-    InetAddress             _remote_addr;
     InetAddress             _remote;
-    ubyte[16]               _local_nonce;
-    uint                    _tx_session;
-    uint                    _rx_session;
-    ubyte                   _tx_seq;         // last sequence assigned
-    ubyte                   _rx_delivered;   // cumulative in-order delivered
-    PeerFlags               _peer_flags;
-    Array!SentFrame         _resend;
-    Array!HeldFrame         _reorder;
-    Array!ubyte             _rel_buf;
     Array!ubyte             _frag_tx;        // the pending fragmented message, behind two spare bytes
     Array!ubyte             _frag_rx;        // the message being reassembled
+    Array!(Array!ubyte)     _frag_hold;      // control frames offered while the train is pending, in order
+    ubyte[16]               _local_nonce;
     uint                    _frag_tx_sent;   // bytes of it submitted
-    DataQueue[2]            _queues;         // val, log
+    PeerFlags               _peer_flags;
 
-    // two segments, so one can be in flight while the next is produced
-    uint backlog_limit()
+    int raw_tx(const(ubyte)[] bytes, bool is_text, TxQueue queue)
     {
-        uint two = 2 * send_limit;
-        return two > backlog_max_bytes ? two : backlog_max_bytes;
-    }
-
-    bool sublayer_armed()
-    {
-        enum promised = InterfaceCaps.reliable | InterfaceCaps.ordered;
-        return uses_udp_endpoint || (_transport.caps & promised) != promised;
-    }
-
-    int raw_tx(const(ubyte)[] bytes, bool is_text)
-    {
-        if (uses_udp_endpoint)
-            return _udp_endpoint.sendto(bytes, _remote) == bytes.length ? 0 : -1;
-
         StackPacket p;
-        if (_peer_flags & PeerFlags.remote_bound)
-            p.init!UDPFrame(bytes).address = _remote_addr;
-        else
+        ref hdr = p.init!RawFrame(bytes);
+        static if (has_rdp)
         {
-            ref hdr = p.init!RawFrame(bytes);
-            hdr.is_text = is_text;
-        }
-        return _transport.forward(&p.packet);
-    }
-
-    // a dispatched frame may restart the session and clear the hold, so each frame is taken
-    // out before dispatch and the hold is re-read afterwards
-    void drain_reorder()
-    {
-        for (;;)
-        {
-            size_t next = size_t.max;
-            foreach (i, ref h; _reorder[])
+            if (uses_rdp)
             {
-                if (h.seq == cast(ubyte)(_rx_delivered + 1))
-                {
-                    next = i;
-                    break;
-                }
+                p.pcp = queue == TxQueue.log ? log_lane : model_lane;
+                return _rdp.send(&p.packet, _remote) < 0 ? -1 : 0;
             }
-            if (next == size_t.max)
-                return;
-            HeldFrame h = _reorder[next].move;
-            _reorder.remove(next);
-            _rx_delivered = h.seq;
-            encoder_for(_encoder).decode_and_dispatch(this, h.payload[]);
         }
-    }
-
-    void begin_header(ubyte kind)
-    {
-        if (_tx_session == 0)
-            _tx_session = make_session_id();
-        _rel_buf.clear();
-        _rel_buf ~= nativeToLittleEndian(_tx_session);
-        _rel_buf ~= nativeToLittleEndian(_rx_session);
-        _rel_buf ~= kind;
-    }
-
-    // new records go out as they are queued and as acks free the segment; the flush timer resends
-    void send_data_frame(TxQueue queue, bool resend = false)
-    {
-        DataQueue* q = &_queues[queue - 1];
-        size_t budget = send_limit + sublayer_overhead;
-        size_t take;
-        size_t wire = sublayer_overhead - 3;
-        while (take < q.backlog.length && (take == 0 || wire + 3 + q.backlog[take].payload.length <= budget))
-            wire += 3 + q.backlog[take++].payload.length;
-        ubyte last = take ? q.backlog[take - 1].id : q.tx_id;
-        if (!resend && last == q.tx_sent)
-            return;
-        q.tx_sent = last;
-
-        begin_header(queue);
-        _rel_buf ~= q.tx_epoch;
-        _rel_buf ~= q.rx_epoch;
-        _rel_buf ~= q.rx_seen;
-        // the id just before the refold: a newer epoch re-bases the receiver here,
-        // which works even for the empty frame that announces a bump post-drain
-        _rel_buf ~= q.backlog.empty ? q.tx_id : cast(ubyte)(q.backlog[0].id - 1);
-        q.ack_pending = false;
-        foreach (ref e; q.backlog[0 .. take])
-        {
-            _rel_buf ~= e.id;
-            _rel_buf ~= cast(ubyte)e.payload.length;
-            _rel_buf ~= cast(ubyte)(e.payload.length >> 8);
-            _rel_buf ~= e.payload[];
-        }
-        q.last_tx = getTime();
-        raw_tx(_rel_buf[], false);
-    }
-
-    void release_control(ubyte ack)
-    {
-        size_t held = _resend.length;
-        while (!_resend.empty && cast(ubyte)(ack - _resend[0].seq) < 128)
-            _resend.remove(0);
-        if (_resend.length != held)
-            arm_tx();
-    }
-
-    void release_data(TxQueue queue, ubyte ack)
-    {
-        DataQueue* q = &_queues[queue - 1];
-        size_t held = q.backlog.length;
-        while (!q.backlog.empty && cast(ubyte)(ack - q.backlog[0].id) < 128)
-        {
-            q.bytes -= q.backlog[0].payload.length;
-            q.backlog.remove(0);
-        }
-        if (q.backlog.length == held)
-            return;
-        if (!q.backlog.empty)
-            send_data_frame(queue);
-        arm_tx();
-    }
-
-    static uint make_session_id()
-    {
-        import urt.crypto.random : crypto_random_bytes;
-        align(size_t.sizeof) ubyte[4] b = void;
-        uint id = 0;
-        while (id == 0)
-        {
-            crypto_random_bytes(b);
-            id = *cast(uint*)b.ptr;
-        }
-        return id;
+        hdr.is_text = is_text;
+        return _transport.forward(&p.packet);
     }
 
     void clear_log_sink()
@@ -1258,12 +993,6 @@ private:
         get_module!LogModule.unregister_consumer(_log_consumer);
         _log_consumer = LogConsumerHandle.init;
         _log_active = false;
-    }
-
-    int send_unwrapped(const(ubyte)[] frame, bool is_text, bool control)
-    {
-        int r = raw_tx(frame, is_text);
-        return r < 0 ? refused(control) : r;
     }
 
     // control has no gap semantics, so a refusal invalidates the session; a refused value or log is backpressure,
@@ -1279,32 +1008,6 @@ private:
             restart();
         }
         return -1;
-    }
-
-    int send_sequenced(const(ubyte)[] frame)
-    {
-        if (_resend.length >= max_unacked)
-        {
-            log.warning("peer '", name[], "' control queue overflow; restarting session");
-            _send_failed = true;
-            restart();
-            return -1;
-        }
-        begin_header(TxQueue.control);
-        _rel_buf ~= ++_tx_seq;
-        _rel_buf ~= _rx_delivered;
-        _peer_flags &= ~PeerFlags.ctl_ack_pending;
-        _rel_buf ~= frame[];
-
-        SentFrame s;
-        s.seq = _tx_seq;
-        s.sent = getTime();
-        s.bytes ~= _rel_buf[];
-        _resend ~= s.move;
-        // accepted-means-enqueued: a failed first send just leaves the frame
-        // to the retransmit path
-        raw_tx(_rel_buf[], false);
-        return 0;
     }
 
     void start_fragments(const(ubyte)[] message)
@@ -1339,19 +1042,34 @@ private:
             ubyte[] frame = _frag_tx[_frag_tx_sent .. _frag_tx_sent + 2 + slice];
             frame[0] = Verb.fragment;
             frame[1] = cast(ubyte)((_frag_tx_sent == 0 ? fragment_first : 0) | (slice < remaining ? fragment_more : 0));
-            int sent = sublayer_armed ? send_sequenced(frame) : send_unwrapped(frame, false, true);
+            int sent = raw_tx(frame, false, TxQueue.control);
+            if (sent < 0)
+                refused(true);
             _frag_tx_sent += cast(uint)slice;
             if (sent < 0 || slice == remaining)
                 _frag_tx.clear();   // done, or the session is restarting
+            if (sent < 0)
+                _frag_hold.clear();
         }
-        return true;
+        // what waited behind the train goes in order; one that starts a train holds the rest again
+        while (!_frag_hold.empty && !_frag_tx.length)
+        {
+            Array!ubyte held = _frag_hold[0].move;
+            _frag_hold.remove(0);
+            if (transmit_unbundled(held[], false, TxQueue.control) < 0)
+            {
+                refused(true);
+                return true;
+            }
+        }
+        return !_frag_tx.length;
     }
 
     void detach_transport()
     {
         _tx_waiter.cancel();
         // the endpoint shares the transport's storage
-        if (uses_udp_endpoint)
+        if (uses_rdp)
             return;
         BaseInterface transport = _transport;
         if (!(_peer_flags & PeerFlags.transport_subscribed))
@@ -1365,21 +1083,32 @@ private:
     }
 
     bool transport_ready()
-        => uses_udp_endpoint ? _udp_endpoint !is null : _transport && _transport.link_up;
-
-    bool create_remote_endpoint()
     {
-        _udp_endpoint = udp_open(null, &_remote, &on_udp_receive);
-        return _udp_endpoint !is null;
+        static if (has_rdp)
+            if (uses_rdp)
+                return _rdp && _rdp.established(_remote);
+        return _transport && _transport.link_up;
     }
 
-    void close_udp_endpoint()
+    static if (has_rdp)
     {
-        if (uses_udp_endpoint && _udp_endpoint)
+        bool open_rdp()
         {
-            if (owns_udp_endpoint)
-                _udp_endpoint.close();
-            _udp_endpoint = null;
+            _rdp = rdp_open(null, &_remote, &on_rdp_message, &on_rdp_event);
+            return _rdp !is null;
+        }
+    }
+
+    void close_rdp()
+    {
+        static if (has_rdp)
+        {
+            if (uses_rdp && _rdp)
+            {
+                if (owns_rdp)
+                    _rdp.close();
+                _rdp = null;
+            }
         }
     }
 
@@ -1412,166 +1141,15 @@ private:
             }
             return;
         }
-        if (!sublayer_armed)
-        {
-            encoder_for(_encoder).decode_and_dispatch(this, frame);
-            return;
-        }
-
-        if (frame.length < 10)
-            return;
-        uint src = frame[0] | frame[1] << 8 | frame[2] << 16 | frame[3] << 24;
-        uint dst = frame[4] | frame[5] << 8 | frame[6] << 16 | frame[7] << 24;
-        ubyte kind = frame[8];
-        frame = frame[9 .. $];
-        if (src == 0 || kind > wire_ack)
-            return;
-
-        if (dst != 0 && dst != _tx_session)
-            return;   // straggler from a dead session, or not for us
-        if (src != _rx_session)
-        {
-            // a matching dst proves freshness (no straggler knows our live session);
-            // dst 0 passes only for a stream-opening hello
-            if (dst == 0 && !(kind == TxQueue.control && frame[0] == 1))
-                return;
-            if (_rx_session != 0)
-            {
-                // the remote began a new stream: it rebooted, and the whole session
-                // space (handles, interning, subs) must rebuild
-                restart();
-                return;
-            }
-            _rx_session = src;
-        }
-
-        if (kind == wire_ack)
-        {
-            if (frame.length < 5)
-                return;
-            release_control(frame[0]);
-            if (frame[1] == _queues[0].tx_epoch)
-            {
-                release_data(TxQueue.val, frame[2]);
-                _queues[0].epoch_acked = true;
-            }
-            if (frame[3] == _queues[1].tx_epoch)
-            {
-                release_data(TxQueue.log, frame[4]);
-                _queues[1].epoch_acked = true;
-            }
-            return;
-        }
-
-        if (kind != TxQueue.control)
-        {
-            if (frame.length < 4)
-                return;
-            DataQueue* q = &_queues[kind - 1];
-            ubyte epoch = frame[0];
-            if (frame[1] == q.tx_epoch)
-            {
-                release_data(cast(TxQueue)kind, frame[2]);
-                q.epoch_acked = true;
-            }
-            ubyte base = frame[3];
-            frame = frame[4 .. $];
-
-            byte age = cast(byte)(epoch - q.rx_epoch);
-            if (age < 0)
-                return;   // a stale-epoch straggler; its stream content is superseded
-            q.ack_pending = true;
-            if (age > 0)
-            {
-                // a declared discontinuity: whatever we never acked is gone, the
-                // stream re-bases just below this frame's refold
-                q.rx_epoch = epoch;
-                q.rx_seen = base;
-            }
-            while (frame.length >= 3)
-            {
-                ubyte id = frame[0];
-                size_t len = frame[1] | frame[2] << 8;
-                frame = frame[3 .. $];
-                if (len > frame.length)
-                    return;
-                ubyte dist = cast(ubyte)(id - q.rx_seen);
-                if (dist != 0 && dist < 128)
-                {
-                    // an unapplicable record (val racing its add) stays unacked; the
-                    // sender refolds it into its next frame, so stop at it and let
-                    // that resupply this one's successors too
-                    if (!encoder_for(_encoder).decode_and_dispatch(this, frame[0 .. len]))
-                        return;
-                    q.rx_seen = id;
-                }
-                frame = frame[len .. $];
-            }
-            return;
-        }
-
-        if (frame.length < 2)
-            return;
-        ubyte seq = frame[0];
-        release_control(frame[1]);
-        frame = frame[2 .. $];
-
-        ubyte dist = cast(ubyte)(seq - _rx_delivered);
-        if (dist == 0 || dist >= 128)
-        {
-            _peer_flags |= PeerFlags.ctl_ack_pending; // duplicate; our ack was lost
-            return;
-        }
-        if (dist == 1)
-        {
-            _rx_delivered = seq;
-            // raised before dispatch: a response transmitted from inside the decode
-            // piggybacks the ack and lowers it again
-            _peer_flags |= PeerFlags.ctl_ack_pending;
-            encoder_for(_encoder).decode_and_dispatch(this, frame);
-            drain_reorder();
-        }
-        else if (dist <= reorder_span && _reorder.length < reorder_cap)
-        {
-            foreach (ref h; _reorder[])
-            {
-                if (h.seq == seq)
-                    return;
-            }
-            HeldFrame h;
-            h.seq = seq;
-            h.payload ~= frame[];
-            _reorder ~= h.move;
-        }
-        // else: too far ahead or hold full; retransmission re-supplies it once the window moves
+        encoder_for(_encoder).decode_and_dispatch(this, frame);
     }
 
-    final package void reset_sublayer()
+    final package void clear_fragments()
     {
         _frag_tx.clear();
         _frag_rx.clear();
+        _frag_hold.clear();
         _frag_tx_sent = 0;
-        _resend.clear();
-        _reorder.clear();
-        _tx_session = 0;
-        _rx_session = 0;
-        _tx_seq = 0;
-        _rx_delivered = 0;
-        _peer_flags &= ~PeerFlags.ctl_ack_pending;
-        foreach (ref q; _queues)
-        {
-            q.backlog.clear();
-            q.bytes = 0;
-            q.tx_id = 0;
-            q.tx_sent = 0;
-            q.tx_epoch = 0;
-            q.rx_seen = 0;
-            q.rx_epoch = 0;
-            q.epoch_acked = false;
-            q.ack_pending = false;
-            q.evicted = 0;
-            q.last_tx = MonoTime.init;
-        }
     }
 
     void on_transport_packet(const(Packet)* p, BaseInterface, PacketDirection, void*) nothrow @nogc
@@ -1579,11 +1157,6 @@ private:
         if (p.type != PacketType.raw && p.type != PacketType.udp)
             return;
         deliver_frame(cast(const(ubyte)[])p.data);
-    }
-
-    final package void on_udp_receive(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo) nothrow @nogc
-    {
-        deliver_frame(cast(const(ubyte)[])data);
     }
 
     // a recreated transport is a new object, so a destroyed one takes the subscriptions with it
@@ -1595,11 +1168,11 @@ private:
             restart();
     }
 
-    bool uses_udp_endpoint() const pure
-        => (_peer_flags & PeerFlags.uses_udp_endpoint) != 0;
+    bool uses_rdp() const pure
+        => (_peer_flags & PeerFlags.uses_rdp) != 0;
 
-    bool owns_udp_endpoint() const pure
-        => (_peer_flags & PeerFlags.owns_udp_endpoint) != 0;
+    bool owns_rdp() const pure
+        => (_peer_flags & PeerFlags.owns_rdp) != 0;
 
     Array!PeerBinding _model_bindings;
 }
@@ -2171,36 +1744,6 @@ unittest
     assert(link.mtu(300) is null && peer.local_segment == 300 && peer.send_limit == 300);
     peer._remote_max_message = 200;
     assert(peer.send_limit == 200);
-
-    // A server's peer shares its unconnected endpoint; the segment comes from the station toward the peer's own
-    // destination, less the ether carrier and the sublayer.
-    {
-        import router.iface.bridge : BridgeInterface;
-        import router.iface.endpoint : UDPReceiveInfo, udp_open;
-        import router.iface.udp : udp_carrier_ether;
-
-        static struct Sink
-        {
-            void recv(UDPEndpoint*, const(void)[], ref UDPReceiveInfo) nothrow @nogc {}
-        }
-        Sink sink;
-        BridgeInterface station = Collection!BridgeInterface().create("sync-test-station");
-        InetAddress local = InetAddress(station.mac.b, 4201);
-        UDPEndpoint* shared_endpoint = udp_open(&local, null, &sink.recv, station);
-        assert(shared_endpoint);
-        SyncPeer served = alloc!SyncPeer(CID(10));
-        scope (exit)
-        {
-            free(served);
-            shared_endpoint.close();
-            station.destroy();
-            Collection!BridgeInterface().table.free_pending();
-        }
-        InetAddress destination = InetAddress(MACAddress(0x02, 0, 0, 0, 0, 9).b, 4201);
-        served.bind_udp_endpoint(shared_endpoint, destination);
-        assert(station.mtu(600) is null);
-        assert(served.local_segment == 600 - udp_carrier_ether - SyncPeer.sublayer_overhead);
-    }
 }
 
 unittest
@@ -2258,8 +1801,13 @@ unittest
             return CompletionStatus.complete;
         }
         uint resets;
+        uint held;
         // producing needs the sync module; a held turn is what the tests observe
-        bool hold(BaseInterface) => true;
+        bool hold(BaseInterface)
+        {
+            ++held;
+            return true;
+        }
     }
 
     Capture link = Collection!Capture().create("sync-test-capture");
@@ -2343,20 +1891,23 @@ unittest
     }
     assert(joined[] == message[]);
 
-    // backpressure halfway pauses it; another control message is refused meanwhile, data still flows
+    // backpressure halfway pauses it; a control message waits behind the train in order, a value in its producer
     link.frames.clear();
     link.room = 2;
     assert(peer.transmit_frame(message[]) == 0 && link.frames.length == 2 && peer.tx_blocked());
     ubyte[4] small = [1, 2, 3, 4];
-    assert(peer.transmit_frame(small[]) < 0 && link.frames.length == 2);
-    assert(peer.transmit_frame(small[], false, TxQueue.val) == 0 && link.frames.length == 3);
+    assert(peer.transmit_frame(small[]) == 0 && link.frames.length == 2 && peer._frag_hold.length == 1);
+    peer._remote_max_message = 600;
+    ubyte[700] unsendable;
+    assert(peer.transmit_frame(unsendable[]) < 0 && peer._frag_hold.length == 1, "the hold takes only what it can send");
+    peer._remote_max_message = 65535;
+    assert(peer.transmit_frame(small[], false, TxQueue.val) < 0 && link.frames.length == 2);
     link.room = size_t.max;
-    assert(peer.pump_fragments() && !peer.tx_blocked());
+    assert(peer.pump_fragments() && !peer.tx_blocked() && peer._frag_hold.empty);
     joined.clear();
-    foreach (i, ref f; link.frames[])
-        if (i != 2)
-            joined ~= f[2 .. $];
-    assert(joined[] == message[] && link.frames[2][] == small[]);
+    foreach (ref f; link.frames[0 .. $ - 1])
+        joined ~= f[2 .. $];
+    assert(joined[] == message[] && link.frames[$ - 1][] == small[]);
 
     // a message over the remote's budget is refused before its first fragment
     link.frames.clear();
@@ -2379,7 +1930,7 @@ unittest
         assert(!peer.running);
     }
 
-    // two peers over lossy links, under the sublayer
+    // a second peer, which reassembles what the first sends
     Capture link_b = Collection!Capture().create("sync-test-capture-b");
     Live remote = alloc!Live(CID(12));
     scope (exit)
@@ -2396,124 +1947,35 @@ unittest
 
     remote._transport = link_b;
     remote._tx_waiter.handler = &remote.hold;
-    link.reliable(false);
-    link_b.reliable(false);
+    link_b.reliable(true);
     peer._remote_segment = 0;
-    assert(link_b.mtu(200) is null && peer.send_limit == 184 && remote.send_limit == 184);
+    assert(link_b.mtu(200) is null && peer.send_limit == 200 && remote.send_limit == 200);
     peer.live(true);
     remote.live(true);
-    peer._tx_session = 0x1111;
-    peer._rx_session = 0x2222;
-    remote._tx_session = 0x2222;
-    remote._rx_session = 0x1111;
     peer._peer_flags |= SyncPeer.PeerFlags.in_session;
     remote._peer_flags |= SyncPeer.PeerFlags.in_session;
 
-    // a lost fragment, a lost last fragment and a duplicate: retransmission fills the gaps and the message arrives once
-    ubyte[3000] lossy;
-    foreach (i, ref b; lossy)
-        b = cast(ubyte)(i * 5 + 1);
-    lossy[0] = 0xFE;
-    enum slice = 184 - 2;
-    link.frames.clear();
-    assert(peer.transmit_frame(lossy[]) == 0 && !peer._frag_tx.length);
-    size_t count = link.frames.length;
-    assert(count == (lossy.length + slice - 1) / slice);
-    foreach (i, ref f; link.frames[])
-    {
-        if (i == 2 || i == count - 1)
-            continue;
-        remote.deliver_frame(f[]);
-        if (i == 5)
-            remote.deliver_frame(f[]);
-    }
-    assert(remote._frag_rx[] == lossy[0 .. 2 * slice] && remote._reorder.length == count - 4);
-
-    link_b.frames.clear();
-    remote.update();
-    assert(link_b.frames.length == 1);
-    peer.deliver_frame(link_b.frames[0][]);
-    assert(peer._resend.length == count - 2);
-
-    peer._resend[0].sent = getTime() - msecs(1000);
-    peer._resend[$ - 1].sent = getTime() - msecs(1000);
-    link.frames.clear();
-    peer.update();
-    assert(link.frames.length == 2);
-    remote.deliver_frame(link.frames[0][]);
-    assert(remote._frag_rx[] == lossy[0 .. (count - 1) * slice] && remote._reorder.empty);
-    remote.deliver_frame(link.frames[1][]);
-    assert(remote._frag_rx.empty && remote.running);
-
-    // a message larger than the control window goes out a window at a time, each resumed by the remote's ack
-    ubyte[65535] large;
-    foreach (i, ref b; large)
+    ubyte[3000] long_message;
+    foreach (i, ref b; long_message)
         b = cast(ubyte)(i * 13);
-    large[0] = 0xFE;
-    link_b.frames.clear();
-    remote.update();
-    peer.deliver_frame(link_b.frames[0][]);
-    link.frames.clear();
-    assert(peer.transmit_frame(large[]) == 0 && peer.tx_blocked());
-    enum window = SyncPeer.max_unacked - SyncPeer.control_reserve;
-    size_t rounds;
-    while (link.frames.length)
-    {
-        assert(link.frames.length <= window);
-        foreach (ref f; link.frames[])
-            remote.deliver_frame(f[]);
-        link.frames.clear();
-        assert(remote._frag_rx[] == large[0 .. remote._frag_rx.length]);
-        link_b.frames.clear();
-        remote.update();
-        peer._tx_waiter.cancel();
-        foreach (ref f; link_b.frames[])
-            peer.deliver_frame(f[]);
-        assert(peer._resend.empty && peer._tx_waiter.waiting);
-        peer.pump_fragments();
-        ++rounds;
-    }
-    assert(rounds == ((large.length + slice - 1) / slice + window - 1) / window);
-    assert(!peer._frag_tx.length && remote._frag_rx.empty && remote.running);
-
-    // the val backlog sends what one segment holds; the next record waits for the ack that frees the segment
-    ubyte[80] record;
-    record[0] = 0xFE;
-    link.frames.clear();
-    foreach (i; 0 .. 3)
-        assert(peer.transmit_frame(record[], false, TxQueue.val) == 0);
-    assert(link.frames.length == 2 && link.frames[1].length <= 200 && peer._queues[0].backlog.length == 3);
-    foreach (ref f; link.frames[])
-        remote.deliver_frame(f[]);
-    link.frames.clear();
-    link_b.frames.clear();
-    remote.update();
-    peer._tx_waiter.cancel();
-    peer.deliver_frame(link_b.frames[0][]);
-    assert(link.frames.length == 1 && peer._queues[0].backlog.length == 1 && peer._tx_waiter.waiting);
-
-    // a bulk producer stops short of evicting: the backlog keeps room for one more segment or reports none
-    assert(peer.val_room());
-    while (peer.val_room())
-        assert(peer.transmit_frame(record[], false, TxQueue.val) == 0);
-    assert(peer._queues[0].evicted == 0 && peer._queues[0].bytes + peer.send_limit > peer.backlog_limit);
+    enum slice = 200 - 2;
 
     // a session reset mid-message discards the partial message, and the next one starts clean
     link.frames.clear();
-    assert(peer.transmit_frame(lossy[]) == 0);
+    assert(peer.transmit_frame(long_message[]) == 0);
     remote.deliver_frame(link.frames[0][]);
     assert(remote._frag_rx.length == slice);
-    remote.reset_sublayer();
+    remote.clear_fragments();
     assert(remote._frag_rx.empty);
-    remote.accept_fragment(SyncPeer.fragment_first | SyncPeer.fragment_more, lossy[0 .. slice]);
-    assert(remote._frag_rx[] == lossy[0 .. slice] && remote.running);
+    remote.accept_fragment(SyncPeer.fragment_first | SyncPeer.fragment_more, long_message[0 .. slice]);
+    assert(remote._frag_rx[] == long_message[0 .. slice] && remote.running);
 
     // framing errors reset the session: a second first fragment, a stray continuation, a nested fragment
-    remote.accept_fragment(SyncPeer.fragment_first, lossy[0 .. 10]);
+    remote.accept_fragment(SyncPeer.fragment_first, long_message[0 .. 10]);
     assert(!remote.running);
     remote.live(true);
     remote._frag_rx.clear();
-    remote.accept_fragment(0, lossy[0 .. 10]);
+    remote.accept_fragment(0, long_message[0 .. 10]);
     assert(!remote.running);
     remote.live(true);
     ubyte[3] nested = [Verb.fragment, SyncPeer.fragment_first, 0];
@@ -2536,7 +1998,6 @@ unittest
         session.stream(stream);
         Collection!Session().add(session);
         peer._console_session = session;
-        peer.release_control(peer._tx_seq);
         char[3000] text = 'a';
 
         // a full transport invites the peer back, and the peer keeps its turn until the console drains
@@ -2550,26 +2011,11 @@ unittest
         link.room = size_t.max;
         assert(!peer.produce_console() && stream.tx_queued() == 0);
 
-        // a full control window waits for the ack, whose wake drains the console
-        ubyte[8] ping;
-        ping[0] = 0xFE;
-        link.frames.clear();
-        while (!peer.tx_blocked())
-            assert(peer.transmit_frame(ping[]) == 0);
-        size_t held = link.frames.length;
-        peer._tx_waiter.cancel();
-        assert(stream.send_bytes(text[]) && link.frames.length == held && !peer._tx_waiter.waiting);
-        assert(!peer.produce_console() && stream.tx_queued() == text.length, "a starved window waits for the ack");
-        peer.release_control(peer._tx_seq);
-        assert(peer._tx_waiter.waiting);
-        assert(!peer.produce_console() && stream.tx_queued() == 0);
-
         // a code point cut between pages goes out whole, though the line is full when it completes
         char[2 + 3 * 100] euros = void;
         euros[0 .. 2] = "ab";
         foreach (i; 0 .. 100)
             euros[2 + 3 * i .. 5 + 3 * i] = "€";
-        peer.release_control(peer._tx_seq);
         link.frames.clear();
         assert(stream.send_bytes(euros[0 .. 150]) && link.frames.length == 1);
         link.room = 1;
@@ -2580,7 +2026,7 @@ unittest
         Array!char relayed;
         foreach (ref f; link.frames[])
         {
-            size_t at = 11 + 3;
+            size_t at = 3;
             size_t length = f[at] & 0x7F;
             if (f[at++] & 0x80)
                 length |= size_t(f[at++]) << 7;
@@ -2594,5 +2040,116 @@ unittest
         session.destroy();
         Collection!Session().update_all();
         stream.detach_peer();
+    }
+
+    // over RDP: sends wait for the session, one lane keeps add before val, bulk stops at its floor until room returns
+    static if (has_rdp)
+    {
+        import router.iface.bridge : BridgeInterface;
+        import router.iface.endpoint : UDPReceiveInfo;
+        import router.iface.rdp : RDPEndpoint, RDPEvent, rdp_open;
+
+        static struct Wire
+        {
+        nothrow @nogc:
+            struct Datagram
+            {
+                RDPEndpoint* to;
+                InetAddress from;
+                Array!ubyte bytes;
+            }
+            RDPEndpoint* a;
+            RDPEndpoint* b;
+            InetAddress addr_a;
+            InetAddress addr_b;
+            Array!Datagram queue;
+
+            void carry(RDPEndpoint* from, const(ubyte)[] frame, ref const InetAddress)
+            {
+                Datagram d;
+                d.to = from is a ? b : a;
+                d.from = from is a ? addr_a : addr_b;
+                d.bytes ~= frame;
+                queue ~= d.move;
+            }
+
+            void pump()
+            {
+                while (!queue.empty)
+                {
+                    Datagram d = queue.pop_front();
+                    UDPReceiveInfo info;
+                    info.source = d.from;
+                    d.to.test_deliver(d.bytes[], info);
+                }
+            }
+        }
+
+        BridgeInterface station = Collection!BridgeInterface().create("sync-test-rdp");
+        Live near = alloc!Live(CID(13));
+        Live far = alloc!Live(CID(14));
+        Wire wire;
+        wire.addr_a = InetAddress(station.mac.b, 4001);
+        wire.addr_b = InetAddress(station.mac.b, 4002);
+        wire.a = rdp_open(&wire.addr_a, null, &near.on_rdp_message, &near.on_rdp_event, station);
+        wire.b = rdp_open(&wire.addr_b, null, &far.on_rdp_message, &far.on_rdp_event, station);
+        assert(wire.a && wire.b);
+        scope (exit)
+        {
+            near.live(false);
+            far.live(false);
+            wire.a.close();
+            wire.b.close();
+            free(far);
+            free(near);
+            station.destroy();
+            Collection!BridgeInterface().table.free_pending();
+        }
+        wire.a._test_wire = &wire.carry;
+        wire.b._test_wire = &wire.carry;
+        near.bind_rdp_session(wire.a, wire.addr_b);
+        far.bind_rdp_session(wire.b, wire.addr_a);
+        near._tx_waiter.handler = &near.hold;
+        far._tx_waiter.handler = &far.hold;
+        near.live(true);
+        far.live(true);
+        assert(!near.transport_ready && near.local_segment == rdp_max_message);
+
+        ubyte[3] add = [1, 1, 1];
+        ubyte[3] val = [2, 2, 2];
+        ubyte[3] line = [3, 3, 3];
+        assert(near.transmit_frame(add[]) < 0);
+        StackPacket opener;
+        opener.init!RawFrame(line[]);
+        assert(wire.a.send(&opener.packet, wire.addr_b) >= 0);
+        wire.pump();
+        assert(near.transport_ready && far.transport_ready && near.local_segment == wire.a.message_limit(wire.addr_b));
+        far._pre_start.clear();
+        far._pre_start_bytes = 0;
+
+        assert(near.transmit_frame(add[]) == 0);
+        assert(near.transmit_frame(val[], false, TxQueue.val) == 0);
+        assert(near.transmit_frame(line[], false, TxQueue.log) == 0);
+        wire.pump();
+        assert(far._pre_start.length == 3 && far._pre_start[0][] == add[] && far._pre_start[1][] == val[]);
+        far._pre_start.clear();
+        far._pre_start_bytes = 0;
+
+        wire.a._test_blocked = true;
+        while (near.control_room())
+            assert(near.transmit_frame(val[], false, TxQueue.val) == 0);
+        assert(near.transmit_frame(line[], false, TxQueue.log) < 0, "a log waits at bulk's floor");
+        assert(near.tx_full() && near.transmit_frame(add[]) == 0, "control still finds room above bulk's floor");
+        near.held = 0;
+        wire.a._test_blocked = false;
+        assert(near.transmit_frame(add[]) == 0);
+        foreach (_; 0 .. 8)
+            wire.pump();
+        assert(near.held == 0, "the fall under a send is not announced inside it");
+        wire.a.test_next_pass();
+        assert(near.control_room() && near.held == 1, "the next pass re-invites the producer once");
+
+        near.on_rdp_event(wire.a, wire.addr_b, RDPEvent.closed);
+        assert(!near.running);
     }
 }

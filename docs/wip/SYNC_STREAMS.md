@@ -80,11 +80,9 @@ reads, where a point read is the latest record and a held window starts with the
 - An increment is a fixed slice: records (position, head at T_k] for every touched element,
   however many frames it spans. Its `val`s carry the increment id in `seq`, and `res {seq}`
   closes it. One increment is in flight per peer; the next opens from where it ended.
-- Sync rides RDP sessions (#869), so every transport is reliable and ordered and a lost
-  frame is the layer's to repair. The shared pin advances when the layer reports the increment's
-  closing `res` delivered, never when a frame is merely accepted for sending. Moving sync onto the
-  layer retires the reliability sublayer whole: the `DataQueue` backlog, refold, epochs and the
-  repush rewind.
+- Sync rides RDP sessions, so every transport is reliable and ordered and a lost frame is the
+  layer's to repair. The shared pin advances when the layer reports the increment's closing `res`
+  delivered, never when a frame is merely accepted for sending.
 - The receiver stages an increment's records in each element's store past a published head, which
   every reader (cursors, walks, `index_for_time`, the register, the dirty sweep) treats as the end.
   Staged writes neither notify nor enlist in the dirty sweep, so a relay never forwards a partial
@@ -105,7 +103,7 @@ A log line is a text record `<severity digit> <tag> <object>: <message>`; the ti
 record's, the host is the node. `LogSink` reads through a pinned cursor, so text files, syslog and
 the console stay sinks with today's formatters. Peer logs arrive as each peer's own log element
 and are merged when read, never inserted: the series stays append-only. This deletes the log
-module's retention and consumers, the log sub verbs and the last `DataQueue` user.
+module's retention and consumers and the log sub verbs.
 
 ## Phases
 
@@ -117,9 +115,9 @@ Each phase is one PR.
 | B1b | Held elements stream through cursors like point series; subscribing arms one record before the latest and marks the element touched, and `add` carries no value for an armed node. sync stores on first change with the sync ceiling; every new store over a held value starts with it as record 0; the shared pin; gaps sent as a null at their start; eviction below every pin when there are no floors. `encode_val` stays for a store-less element's register, and the val-queue repair rewinds held positions to their latest record (B2 deletes it). | `_pending_vals` coalescing, the value in armed `add`s, the re-push of every armed node |
 | B1c | Counters for sync stores (live, peak, created, freed, grown, bytes) on the `system` device once #849 lands; `lost` on `/sync/peer`. | |
 | B2a | One value path: a `once` sub answers each match with `val`s carrying the request's `seq`, bundled on the control plane, from one sample-frame encoder per encoding; a point read is the latest record, `from`/`to` a range from the record holding at `from`, `points` its span means. An armed sub's `from` seeds its position. `index_for_time` is exact. Protocol version 3. | `history_req`/`history` and the `history` capability, the value in `add`, `send_backfill` and the parked live cursor, the unarmed value retry, `SampleAggregator` |
-| B2b | Increments, after sync moves onto RDP sessions: the increment id in `seq` closed by `res`, the store's published head and staging, held delivery on receivers and clients, the pin advancing on delivery. | the repush rewind (the move itself retires the `DataQueue` backlog, refold and epochs) |
+| B2b | Increments: the increment id in `seq` closed by `res`, the store's published head and staging, held delivery on receivers and clients, the pin advancing on delivery. | |
 | B3 | Sync store release, the freelist and demotion, if B1c's counters justify the first two. | |
-| C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs, `DataQueue` |
+| C | Logs as a text series, `LogSink` on a cursor, merged reads. | `log.d` retention and consumers, log sub verbs |
 
 ## Candidates waiting on measurement
 

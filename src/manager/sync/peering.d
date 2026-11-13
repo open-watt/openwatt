@@ -15,6 +15,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.features : has_rdp;
 import manager.plugin;
 import manager.sync : SyncModule;
 import manager.sync.discovery;
@@ -22,8 +23,10 @@ import manager.sync.encoder : encoder_for, SyncEncoderKind;
 import manager.sync.peer : SyncPeer;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint, udp_open;
 import router.iface.ethernet : EthernetStation;
+
+static if (has_rdp)
+    import router.iface.rdp : RDPEndpoint, rdp_open;
 
 nothrow @nogc:
 
@@ -87,7 +90,8 @@ nothrow @nogc:
             if (now < _next_sweep)
                 return;
             _next_sweep = now + sweep_interval;
-            sweep_authorities(now);
+            static if (has_rdp)
+                sweep_authorities(now);
             return;
         }
 
@@ -102,29 +106,32 @@ nothrow @nogc:
         claim_inbound(now);
     }
 
-    // Every authority this node can see and is allowed to join. An adopted member talks
-    // only to its own fleet; a factory node talks to whoever answers, and the authority
-    // decides whether to keep it.
-    final void sweep_authorities(MonoTime now)
+    static if (has_rdp)
     {
-        foreach (kvp; get_module!SyncDiscoveryModule.neighbors[])
+        // Every authority this node can see and is allowed to join. An adopted member talks
+        // only to its own fleet; a factory node talks to whoever answers, and the authority
+        // decides whether to keep it.
+        final void sweep_authorities(MonoTime now)
         {
-            ref n = kvp.value;
-            if (n.role != PeerRole.authority)
-                continue;
-
-            const(char)[] mine = bound_cluster[];
-            if (mine.length && n.cluster.length && n.cluster[] != mine)
-                continue;
-
-            if (ClaimAttempt* a = kvp.key in _attempts)
-                if (a.peer)
+            foreach (kvp; get_module!SyncDiscoveryModule.neighbors[])
+            {
+                ref n = kvp.value;
+                if (n.role != PeerRole.authority)
                     continue;
 
-            NeighborLink* link = n.best_link(now);
-            if (!link)
-                continue;
-            start_session(kvp.key, n, *link);
+                const(char)[] mine = bound_cluster[];
+                if (mine.length && n.cluster.length && n.cluster[] != mine)
+                    continue;
+
+                if (ClaimAttempt* a = kvp.key in _attempts)
+                    if (a.peer)
+                        continue;
+
+                NeighborLink* link = n.best_link(now);
+                if (!link)
+                    continue;
+                start_session(kvp.key, n, *link);
+            }
         }
     }
 
@@ -676,48 +683,51 @@ private:
         disco.local_adopted = _secret.length != 0;
     }
 
-    void start_session(ulong node_id, ref const Neighbor n, ref NeighborLink link)
+    static if (has_rdp)
     {
-        char[16] id = hex_id(node_id);
-        SyncPeer peer = Collection!SyncPeer().create(n.name[], ObjectFlags.dynamic);
-        if (!peer)
-            peer = Collection!SyncPeer().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
-        if (!peer)
+        void start_session(ulong node_id, ref const Neighbor n, ref NeighborLink link)
         {
-            log.warning("failed to create session peer for authority ", id[]);
-            return;
-        }
-        BaseInterface link_iface = link.iface.get;
-        EthernetStation station;
-        if (link.remote.family == AddressFamily.ether)
-            station = dyn_cast!EthernetStation(link_iface);
-        InetAddress local = link.local;
-        local.port = 0;
-        UDPEndpoint* endpoint = udp_open(&local, &link.remote, &peer.on_udp_receive, station);
-        if (!endpoint)
-        {
-            log.warning("failed to create session transport for authority ", id[]);
-            peer.destroy();
-            return;
-        }
-        peer.adopt_udp_endpoint(endpoint);
-        peer.encoder(SyncEncoderKind.binary);
-        peer.subscribe(&claim_peer_state);
+            char[16] id = hex_id(node_id);
+            SyncPeer peer = Collection!SyncPeer().create(n.name[], ObjectFlags.dynamic);
+            if (!peer)
+                peer = Collection!SyncPeer().create(tconcat("auth-", id[]), ObjectFlags.dynamic);
+            if (!peer)
+            {
+                log.warning("failed to create session peer for authority ", id[]);
+                return;
+            }
+            BaseInterface link_iface = link.iface.get;
+            EthernetStation station;
+            if (link.remote.family == AddressFamily.ether)
+                station = dyn_cast!EthernetStation(link_iface);
+            InetAddress local = link.local;
+            local.port = 0;
+            RDPEndpoint* endpoint = rdp_open(&local, &link.remote, &peer.on_rdp_message, &peer.on_rdp_event, station);
+            if (!endpoint)
+            {
+                log.warning("failed to create session transport for authority ", id[]);
+                peer.destroy();
+                return;
+            }
+            peer.adopt_rdp(endpoint, link.remote);
+            peer.encoder(SyncEncoderKind.binary);
+            peer.subscribe(&claim_peer_state);
 
-        ClaimAttempt* a = node_id in _attempts;
-        if (!a)
-            a = _attempts.insert(node_id, ClaimAttempt());
-        a.peer = peer;
-        a.link_iface = link.iface;
-        a.link_local = link.local;
-        a.link_remote = link.remote;
-        a.sent = false;
-        a.claimed = false;
-        a.handover = false;
-        // the setup window: transport up and hellos exchanged; expiry demotes the link
-        a.deadline = getTime() + claim_timeout;
+            ClaimAttempt* a = node_id in _attempts;
+            if (!a)
+                a = _attempts.insert(node_id, ClaimAttempt());
+            a.peer = peer;
+            a.link_iface = link.iface;
+            a.link_local = link.local;
+            a.link_remote = link.remote;
+            a.sent = false;
+            a.claimed = false;
+            a.handover = false;
+            // the setup window: transport up and hellos exchanged; expiry demotes the link
+            a.deadline = getTime() + claim_timeout;
 
-        log.info("opening session to authority ", id[], " ('", n.name, "') at ", link.remote, " via ", link_iface ? link_iface.name[] : "ip");
+            log.info("opening session to authority ", id[], " ('", n.name, "') at ", link.remote, " via ", link_iface ? link_iface.name[] : "ip");
+        }
     }
 
     void claim_peer_state(ActiveObject obj, StateSignal sig)
