@@ -1691,9 +1691,9 @@ this is what remains.
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
   bindings that abort or deref on data an attacker controls, and these survive. MQTT's
   `desc_by_index(mqtt.desc)` (`src/protocol/mqtt/binding.d:216`) has no `desc == ushort.max`
-  check. `ows.load` still reads `first_index`/`last_index`/`stride` off disk unvalidated
-  (`src/manager/ows.d:59`), so a corrupt or hostile container is trusted. External state
-  rejects, it does not assert.
+  check. OWS block headers are validated, but persisted dynamic-record offsets and u15
+  heap lengths still need payload validation before `series.heap_view` exposes their bytes.
+  External state rejects, it does not assert.
 
 - **Close the descriptor grammar gaps**: `strN` widths parse but are ignored entirely, so any
   `N` compiles unvalidated while the span comes from the register map

@@ -141,57 +141,70 @@ nothrow @nogc:
             return true;
         }
 
+        ulong file_size = get_size(_file);
+        if (fh.header_bytes < FileHeader.sizeof || fh.header_bytes > file_size)
+        {
+            close_();
+            return false;
+        }
+
         Array!(Bucket*) adopted;
-        ulong offset = fh.header_bytes;
+        ulong offset = file_size == fh.header_bytes ? 0 : fh.header_bytes;
         _end = fh.header_bytes;
         FormatId run_id = FormatId.invalid;
         ulong next_index = 0;
-        while (offset)
+        bool adopt(ref ulong at)
         {
             BlockHeader hdr;
-            if (read_at(_file, (cast(void*)&hdr)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
-                || bytes < BlockHeader.sizeof || hdr.header_bytes < BlockHeader.sizeof)
+            if (!read_header(at, hdr) || !block_sane(hdr, at, file_size))
+                return false;
+            ulong anchor = hdr.format_block ? hdr.format_block : at;
+            if (anchor < fh.header_bytes || anchor > at)
+                return false;
+            if (anchor != _fmt_anchor)
+            {
+                if (!load_format(anchor, file_size))
+                    return false;
+                run_id = register_block_format(_afmt);
+            }
+            bool irregular = (hdr.flags & BlockHeader.Flags.irregular) != 0;
+            if (irregular != (_afmt.rate == 0)
+                || (hdr.heap_bytes && _afmt.count != 0) || hdr.heap_bytes > ushort.max + 1U)
+                return false;
+            ulong image_bytes = hdr.count * (cast(ulong)_afmt.stride + (irregular ? uint.sizeof : 0)) + hdr.heap_bytes;
+            if (image_bytes > uint.max || (hdr.codec == ows_codec_raw && hdr.payload_bytes != image_bytes))
+                return false;
+            Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
+            *b = Bucket.init;
+            b.format = run_id;
+            b.first_index = next_index;
+            b.count = hdr.count;
+            b.first_tick = hdr.first_tick;
+            b.end_tick = hdr.last_tick;
+            b.heap_used = hdr.heap_bytes;
+            b.codec = hdr.codec;
+            b.packed_bytes = hdr.payload_bytes;
+            b.sealed = true;
+            b.ended = (hdr.flags & BlockHeader.Flags.ended) != 0;
+            b.file_offset = at + hdr.header_bytes;
+            adopted ~= b;
+            next_index += hdr.count;
+            _tail = at;
+            _end = at + hdr.header_bytes + hdr.payload_bytes;
+            at = hdr.next;
+            return true;
+        }
+        while (offset)
+        {
+            ulong previous_anchor = _fmt_anchor;
+            BlockFormatHeader previous_format = _afmt;
+            if (!adopt(offset))
+            {
+                _fmt_anchor = previous_anchor;
+                _afmt = previous_format;
+                writeWarning("series container: corrupt block at ", offset, "; ignoring the remaining history");
                 break;
-            if (hdr.format_block == 0)
-            {
-                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
-                            offset + BlockHeader.sizeof, bytes) != Result.success
-                    || bytes < BlockFormatHeader.sizeof)
-                    break;
-                _fmt_anchor = offset;
-                run_id = register_block_format(_afmt);
             }
-            else if (hdr.format_block != _fmt_anchor)
-            {
-                // referenced run isn't the walking one (future compaction); resolve directly
-                if (read_at(_file, (cast(void*)&_afmt)[0 .. BlockFormatHeader.sizeof],
-                            hdr.format_block + BlockHeader.sizeof, bytes) != Result.success
-                    || bytes < BlockFormatHeader.sizeof)
-                    break;
-                _fmt_anchor = hdr.format_block;
-                run_id = register_block_format(_afmt);
-            }
-            if (hdr.count && run_id.valid)
-            {
-                Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
-                *b = Bucket.init;
-                b.format = run_id;
-                b.first_index = next_index;
-                b.count = hdr.count;
-                b.first_tick = hdr.first_tick;
-                b.end_tick = hdr.last_tick;
-                b.heap_used = hdr.heap_bytes;
-                b.codec = hdr.codec;
-                b.packed_bytes = hdr.payload_bytes;
-                b.sealed = true;
-                b.ended = (hdr.flags & BlockHeader.Flags.ended) != 0;
-                b.file_offset = offset + hdr.header_bytes;
-                adopted ~= b;
-                next_index += hdr.count;
-            }
-            _tail = offset;
-            _end = offset + hdr.header_bytes + hdr.payload_bytes;
-            offset = hdr.next;
         }
 
         if (next_index)
@@ -375,6 +388,43 @@ private:
     bool _open;
     bool _end_gap;
     bool _end_pending;
+
+    static bool block_sane(ref const BlockHeader hdr, ulong offset, ulong size) pure
+    {
+        if (offset > size || hdr.header_bytes < BlockHeader.sizeof || !hdr.payload_bytes
+            || hdr.header_bytes > size - offset || hdr.payload_bytes > size - offset - hdr.header_bytes)
+            return false;
+        ulong end = offset + hdr.header_bytes + hdr.payload_bytes;
+        return hdr.last_index >= hdr.first_index && hdr.last_index - hdr.first_index < uint.max
+            && hdr.last_tick >= hdr.first_tick && (!hdr.next || hdr.next >= end);
+    }
+
+    static bool format_sane(ref const BlockFormatHeader bf) pure
+    {
+        if (bf.type > ValueType.char_ || bf.kind > SeriesKind.point || bf.header_bytes < BlockFormatHeader.sizeof)
+            return false;
+        DataFormat f = DataFormat(cast(ValueType)bf.type, cast(SeriesKind)bf.kind);
+        f.count = bf.count;
+        if (bf.count == 0 ? bf.type != ValueType.char_ && bf.type != ValueType.u8 : !f.stride_fits)
+            return false;
+        return bf.stride == f.stride;
+    }
+
+    bool load_format(ulong anchor, ulong size)
+    {
+        BlockHeader hdr;
+        BlockFormatHeader bf;
+        size_t bytes;
+        if (!read_header(anchor, hdr) || !block_sane(hdr, anchor, size) || hdr.format_block != 0
+            || hdr.header_bytes < BlockHeader.sizeof + BlockFormatHeader.sizeof
+            || read_at(_file, (cast(void*)&bf)[0 .. BlockFormatHeader.sizeof], anchor + BlockHeader.sizeof, bytes) != Result.success
+            || bytes != BlockFormatHeader.sizeof || !format_sane(bf)
+            || hdr.header_bytes < BlockHeader.sizeof + bf.header_bytes)
+            return false;
+        _fmt_anchor = anchor;
+        _afmt = bf;
+        return true;
+    }
 
     static FormatId register_block_format(ref const BlockFormatHeader bf)
     {
@@ -564,6 +614,8 @@ unittest
     // a format change starts a new run: the follower re-anchors and both read back typed
     enum fpath = "ows_format_unittest.tmp";
     delete_file(fpath);
+
+
     {
         Element e;
         e.format = register_format(f64_held);
@@ -602,6 +654,90 @@ unittest
         e.teardown();
     }
     delete_file(fpath);
+
+    enum cpath = "ows_corrupt_unittest.tmp";
+    void make_file()
+    {
+        delete_file(cpath);
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        assert(c.open_(cpath, *h));
+        foreach (i; 0 .. 4)
+        {
+            e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
+            if (i == 1)
+                e.invalidate(e.last_update);
+        }
+        h.seal(h.buckets[$-1]);
+        foreach (b; h.buckets[])
+            assert(c.append(b));
+        c.close_();
+        h.container = null;
+        e.teardown();
+    }
+    void patch(ulong offset, ulong value, size_t size)
+    {
+        File f;
+        size_t n;
+        assert(urt.file.open(f, cpath, FileOpenMode.ReadWriteExisting) == Result.success);
+        assert(write_at(f, (cast(const(void)*)&value)[0 .. size], offset, n) == Result.success && n == size);
+        urt.file.close(f);
+    }
+    int reopen(bool append_sample = false) // -1 = refused, else adopted buckets
+    {
+        Element e;
+        e.format = register_format(f64_held);
+        SeriesStore* h = e.ensure_history();
+        SeriesContainer c;
+        int r = c.open_(cpath, *h) ? cast(int)h.buckets.length : -1;
+        if (append_sample)
+        {
+            assert(r >= 0);
+            e.write_sample(9.0, from_unix_time_ns(5_000_000));
+            h.seal(h.buckets[$-1]);
+            assert(c.append(h.buckets[$-1]));
+        }
+        c.close_();
+        h.container = null;
+        e.teardown();
+        return r;
+    }
+    enum b1 = FileHeader.sizeof;
+    enum b2 = b1 + BlockHeader.sizeof + BlockFormatHeader.sizeof + 2 * (uint.sizeof + double.sizeof);
+    enum fmt1 = b1 + BlockHeader.sizeof;
+
+    make_file();
+    assert(reopen() == 2);
+    patch(b2 + BlockHeader.next.offsetof, b2, 8);                    // self-pointing link
+    assert(reopen(true) == 1);
+    assert(reopen() == 2);
+    make_file();
+    patch(b1 + BlockHeader.first_index.offsetof, 5, 8);              // last_index < first_index
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.type.offsetof, 0xFF, 1);
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.count.offsetof, 64, 1);           // 512-byte stride
+    assert(reopen() == 0);
+    make_file();
+    patch(fmt1 + BlockFormatHeader.stride.offsetof, 9, 2);
+    assert(reopen() == 0);
+    make_file();
+    patch(b1 + BlockHeader.payload_bytes.offsetof, 2 * (uint.sizeof + double.sizeof) - 8, 4);
+    assert(reopen() == 0);
+    make_file();
+    patch(b1 + BlockHeader.payload_bytes.offsetof, uint.max, 4);
+    assert(reopen() == 0);
+    make_file();
+    patch(b2 + BlockHeader.format_block.offsetof, ulong.max, 8);
+    assert(reopen() == 1);
+    make_file();
+    patch(FileHeader.header_bytes.offsetof, 0, 2);
+    assert(reopen() == -1);
+    delete_file(cpath);
 }
 
 version (unittest)
