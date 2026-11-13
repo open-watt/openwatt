@@ -868,10 +868,7 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 9. **Network indication**: once #749's wifi mirror moves from the SmartEVSE binding into
    `system.status.network`.
 
-10. **A light's `level` prints as `1e+2%`**: `/device/print` shows the `Quantity!(ubyte, Percent)`
-    at 100 in exponent form. Find where an integral quantity is formatted as a float.
-
-11. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
+10. **Changing a binding's `kind` leaves the old kind's elements**: a `light` made a `button`
     keeps `effect`, `indicate`, `pulse`, `level` and `switch` beside `mode`, `state` and `event`,
     stale under a component now templated `Button`. Elements outlive a restart by design; a kind
     change should drop the ones the new kind does not bind.
@@ -891,11 +888,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 
 - **Decide whether `/element/set value=1` converts to bool**: the element rejects it today and
   the console now says so (`value=true` works).
-
-- **The console prints quantities badly**: `/device/print` shows an integer 1310 nm as
-  `1.31e+3nm` and a float supply of 3.2616 V as `3.2616000175476074V`. The stored values are
-  right; the tree view's quantity formatting wants integers printed as integers and floats to a
-  precision that matches their resolution.
 
 - **`system` device memory is the allocator's own accounting**: on desktop that counts uRT
   allocations only, not the process's working set, which stays in `/system/sysinfo`. On ESP32
