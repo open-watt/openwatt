@@ -80,6 +80,7 @@ recoverable plaintext. Missing secrets must be re-entered.
 - Secret `services` and DNS-server `protocols` getters return arrays. Their setters accept
   comma-separated values; setting DNS protocols replaces the previous selection.
 - TCP-client `remote` returns the configured hostname or the live typed network address.
+- TLS-stream `remote` returns and exports the configured hostname or numeric endpoint, including its port.
 - HTTP-server, MQTT-broker and TLS `certificates` getters return arrays of certificate names.
   TLS `certificate` is a singular setter; exports use the canonical `certificates` property.
 
