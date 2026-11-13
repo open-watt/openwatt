@@ -744,7 +744,7 @@ ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-clean
 endif
 
-BUILD_FLAGS := $(DFLAGS) $(BUILD_CMD_FLAGS) $(RAM_IMAGE) $(RAM_IMAGE_PACKER)
+BUILD_FLAGS := $(DFLAGS) $(RAM_IMAGE) $(RAM_IMAGE_PACKER)
 FLAGS_CHANGED := $(shell printf '%s' '$(BUILD_FLAGS)' | cmp -s - $(FLAGSTAMP) || echo 1)
 
 ifneq ($(FLAGS_CHANGED),)
