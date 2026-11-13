@@ -13,7 +13,7 @@ import router.status;
 
 import urt.internal.sys.posix;
 
-import driver.linux.raw : ioctl, ifreq, IFNAMSIZ, socket, bind, sendto, recv;
+import driver.linux.raw : ioctl, ifreq, IFNAMSIZ, socket;
 
 nothrow @nogc:
 
@@ -45,15 +45,13 @@ AdapterChange apply_os_adapter_info(BaseInterface iface, ref IfStatus status, re
 
 
 // Linux adapter introspection backed by /sys/class/net/<iface>/*.
-// Pulls MAC, MTU, carrier, link speed for an existing netdev, and walks the
+// Pulls MAC, carrier, link speed for an existing netdev, and walks the
 // directory to enumerate candidate ethernet adapters.
 
 struct OSAdapterInfo
 {
     bool valid;
     MACAddress mac;
-    uint mtu;
-    uint max_mtu;
     ConnectionStatus connection = ConnectionStatus.unknown;
     ulong tx_link_speed;    // bps
     ulong rx_link_speed;    // bps
@@ -155,22 +153,6 @@ bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
         return false;
     if (info.mac.fromString(data.trimBack) != MACAddress.StringLen)
         return false;
-
-    // MTU
-    p = build_path(adapter_name, "/mtu");
-    data = read_file(p, buf[]);
-    if (data !is null)
-    {
-        auto s = data.trimBack;
-        size_t consumed;
-        ulong mtu = parse_uint(s, &consumed);
-        if (consumed == s.length && consumed > 0)
-            info.mtu = cast(uint)mtu;
-    }
-
-    uint ifindex = read_ifindex(adapter_name);
-    if (ifindex != 0)
-        query_link_mtu(ifindex, info.mtu, info.max_mtu);
 
     // carrier (1=up, 0=down). May fail with EINVAL if interface is admin-down.
     p = build_path(adapter_name, "/carrier");
@@ -301,87 +283,6 @@ private void walk_netdevs(scope void delegate(const(char)[] name, const(char)[] 
 
 private:
 
-bool query_link_mtu(uint ifindex, ref uint mtu, ref uint max_mtu)
-{
-    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-    if (fd < 0)
-        return false;
-    scope(exit) close(fd);
-
-    sockaddr_nl addr;
-    addr.nl_family = AF_NETLINK;
-    if (bind(fd, &addr, sockaddr_nl.sizeof) < 0)
-        return false;
-
-    ubyte[128] req_buf = void;
-    size_t off;
-    nlmsghdr* hdr = cast(nlmsghdr*)req_buf.ptr;
-    hdr.nlmsg_type = RTM_GETLINK;
-    hdr.nlmsg_flags = NLM_F_REQUEST;
-    hdr.nlmsg_seq = 1;
-    hdr.nlmsg_pid = 0;
-    off += nlmsghdr.sizeof;
-
-    ifinfomsg* info = cast(ifinfomsg*)(req_buf.ptr + off);
-    info.ifi_family = AF_UNSPEC;
-    info.ifi_index = cast(int)ifindex;
-    info.ifi_change = 0xFFFF_FFFF;
-    off += ifinfomsg.sizeof;
-    hdr.nlmsg_len = cast(uint)off;
-
-    sockaddr_nl kernel;
-    kernel.nl_family = AF_NETLINK;
-    if (sendto(fd, req_buf.ptr, off, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)off)
-        return false;
-
-    ubyte[8192] reply = void;
-    ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
-    if (n <= 0)
-        return false;
-
-    const(ubyte)[] data = reply[0 .. cast(size_t)n];
-    while (data.length >= nlmsghdr.sizeof)
-    {
-        const nlmsghdr* mh = cast(const nlmsghdr*)data.ptr;
-        uint len = mh.nlmsg_len;
-        if (len < nlmsghdr.sizeof || len > data.length)
-            return false;
-        if (mh.nlmsg_type == NLMSG_ERROR)
-            return false;
-        if (mh.nlmsg_type == RTM_NEWLINK && len >= nlmsghdr.sizeof + ifinfomsg.sizeof)
-        {
-            const(ubyte)[] attrs = data[nlmsghdr.sizeof + ifinfomsg.sizeof .. len];
-            while (attrs.length >= rtattr.sizeof)
-            {
-                const rtattr* a = cast(const rtattr*)attrs.ptr;
-                if (a.rta_len < rtattr.sizeof || a.rta_len > attrs.length)
-                    break;
-                ushort type = a.rta_type & NLA_TYPE_MASK;
-                const(ubyte)[] payload = attrs[rtattr.sizeof .. a.rta_len];
-                if (type == IFLA_MTU && payload.length >= 4)
-                    mtu = load_u32(payload);
-                else if (type == IFLA_MAX_MTU && payload.length >= 4)
-                    max_mtu = load_u32(payload);
-
-                uint aligned_attr = (a.rta_len + 3) & ~3u;
-                if (aligned_attr >= attrs.length)
-                    break;
-                attrs = attrs[aligned_attr .. $];
-            }
-            return true;
-        }
-
-        uint aligned = (len + 3) & ~3u;
-        if (aligned >= data.length)
-            break;
-        data = data[aligned .. $];
-    }
-    return false;
-}
-
-uint load_u32(const(ubyte)[] d) pure
-    => d[0] | (uint(d[1]) << 8) | (uint(d[2]) << 16) | (uint(d[3]) << 24);
-
 extern(C) nothrow @nogc
 {
     struct DIR;
@@ -400,51 +301,6 @@ extern(C) nothrow @nogc
     dirent* readdir(DIR* dir);
 
     int* __errno_location();
-}
-
-enum AF_NETLINK = 16;
-enum NETLINK_ROUTE = 0;
-enum SOCK_RAW = 3;
-enum AF_UNSPEC = 0;
-enum NLM_F_REQUEST = 0x01;
-enum NLMSG_ERROR = 2;
-enum RTM_NEWLINK = 16;
-enum RTM_GETLINK = 18;
-enum IFLA_MTU = 4;
-enum IFLA_MAX_MTU = 51;
-enum NLA_TYPE_MASK = 0x3FFF;
-
-struct sockaddr_nl
-{
-    ushort nl_family;
-    ushort nl_pad;
-    uint   nl_pid;
-    uint   nl_groups;
-}
-
-struct nlmsghdr
-{
-    uint   nlmsg_len;
-    ushort nlmsg_type;
-    ushort nlmsg_flags;
-    uint   nlmsg_seq;
-    uint   nlmsg_pid;
-}
-
-struct ifinfomsg
-{
-    ubyte  ifi_family;
-    ubyte  __pad;
-    ushort ifi_type;
-    int    ifi_index;
-    uint   ifi_flags;
-    uint   ifi_change;
-}
-
-struct rtattr
-{
-    ushort rta_len;
-    ushort rta_type;
 }
 
 const(char)* build_path(const(char)[] iface, const(char)[] suffix)
