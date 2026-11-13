@@ -4,6 +4,7 @@ version (linux):
 
 import urt.endian : LittleEndian;
 import urt.file : sync_directory;
+import urt.internal.stdc.errno : errno, ENOENT;
 import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
 import urt.log;
 import urt.string.format : tconcat;
@@ -79,6 +80,15 @@ int ota_begin(size_t image_size, ref uint handle)
     const(char)[] dir = install_dir();
     if (!dir.length)
         return -1;
+
+    // a staged marker may name the slot we are about to overwrite; it must not survive a failed retry
+    char[4096] next_buf = void;
+    const(char)* next_path = zpath(next_buf, "openwatt.next");
+    if (!next_path || (unlink(next_path) != 0 && errno != ENOENT) || !sync_directory(dir))
+    {
+        log_error("ota", "withdraw staged slot marker failed");
+        return -1;
+    }
 
     int slot = current_slot();
     g_ota_slot = (slot >= 0 ? slot : 0) + 1;
