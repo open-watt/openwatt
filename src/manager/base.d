@@ -796,15 +796,17 @@ private:
 
 inout(T) dyn_cast(T)(inout(BaseObject) object) nothrow @nogc
     if (is(T : BaseObject) && !is(T == BaseObject))
+    => is_kind_of(object, dyn_type_info!T()) ? cast(inout(T))cast(inout(void)*)object : null;
+
+pragma(inline, false)
+bool is_kind_of(const(BaseObject) object, const(DynTypeInfo)* target) pure nothrow @nogc
 {
     if (object is null)
-        return null;
-
-    const(DynTypeInfo)* target = dyn_type_info!T();
+        return false;
     for (const(DynTypeInfo)* type_info = &object._typeInfo.dyn_type; type_info; type_info = type_info.parent)
         if (type_info is target)
-            return cast(inout(T))cast(inout(void)*)object;
-    return null;
+            return true;
+    return false;
 }
 
 class ActiveObject : BaseObject
@@ -1287,7 +1289,7 @@ nothrow @nogc:
     }
 
     inout(Type) get() inout pure
-        => cast(inout(Type))cast(void*)get_item(_id); // void* makes it into a static cast, since we're already confident of the type
+        => cast(inout(Type))dyn_cast!Type(get_item(_id));
 
     String name() const pure
         => get_id(_id);
@@ -2159,6 +2161,19 @@ unittest
             ++count;
         }
     }
+
+    // a same-name claimant of an unrelated type must not resolve through a typed ObjectRef
+    ElemTestObject typed = alloc!ElemTestObject(table.allocate("ref-typed", 0));
+    table.bind(typed.id, typed);
+    ObjectRef!ElemTestObject typed_ref = typed;
+    assert(typed_ref.get is typed);
+    table.remove(typed.id);
+    LifecycleTestObject imposter = alloc!LifecycleTestObject(table.allocate("ref-typed", 0));
+    table.bind(imposter.id, imposter);
+    assert(typed_ref.get is null);
+    table.remove(imposter.id);
+    free(imposter);
+    free(typed);
 
     // destroy() starts teardown immediately; the object leaves with shutdown already run
     LifecycleTestObject lifecycle = alloc!LifecycleTestObject(table.allocate("lifecycle-o", 0));
