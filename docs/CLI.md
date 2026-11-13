@@ -1712,7 +1712,7 @@ URI containing `?`, `=` or `@`, since the argument parser reserves them.
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
 | `on` | URI list | none | Triggers, comma-separated. `@path` (element change), `every:<dur>[?repeat=false]`, `at:<hh:mm>[?days=mon,wed,fri]`, `when:<datetime>`, `object:<name>?state=online\|offline\|destroyed`. |
-| `schedule` | duration | none | Write-only sugar for `on="every:<dur>"`. Shares the slot with `on`. |
+| `schedule` | duration | none | Write-only sugar for `on="every:<dur>"`. Duration must be positive. Shares the slot with `on`. |
 | `at` | `hh:mm` | none | Write-only sugar for `on="at:<hh:mm>"`. |
 | `when` | datetime | none | Write-only sugar for `on="when:<datetime>"`. |
 | `if` | expression | none | Quoted boolean gate; a falsey result skips the action. Reads elements by `@path`, compares with units. |
