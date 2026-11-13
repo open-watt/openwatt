@@ -70,8 +70,7 @@ nothrow @nogc:
     override void unsubscribe(SignalSub handle)
     {
         TimeSub s = cast(TimeSub)cast(void*)handle;
-        s.disarm();
-        free(s);
+        s.release();
     }
 
     override SysTime next_run(SignalSub handle) const
@@ -133,6 +132,17 @@ nothrow @nogc:
         }
     }
 
+    // the sink may unsubscribe us (an automation restarting or removing itself), so a release
+    // during on_fire defers the free until the sink returns
+    void release()
+    {
+        disarm();
+        if (_firing)
+            _released = true;
+        else
+            free(this);
+    }
+
     SysTime next_run() const
         => _done ? SysTime() : _next;
 
@@ -141,6 +151,8 @@ private:
     bool _fire_scheduled;
     bool _wc_subscribed;
     bool _done;
+    bool _firing;
+    bool _released;
 
     void schedule_fire(MonoTime anchor)
     {
@@ -167,7 +179,14 @@ private:
         _fire_scheduled = false;
 
         SignalEvent ev = { source: "time" };
+        _firing = true;
         sink(scheduled, ev);
+        _firing = false;
+        if (_released)
+        {
+            free(this);
+            return;
+        }
 
         bool one_shot = false;
         final switch (kind)
@@ -273,4 +292,28 @@ ubyte parse_days(const(char)[] s)
         }
     }
     return mask ? mask : 0x7F;
+}
+
+
+unittest
+{
+    static struct SelfRelease
+    {
+    nothrow @nogc:
+        TimeSub sub;
+        int fired;
+        void sink(MonoTime, ref const SignalEvent)
+        {
+            ++fired;
+            sub.release();
+        }
+    }
+
+    SelfRelease r;
+    r.sub = alloc!TimeSub();
+    r.sub.sink = &r.sink;
+    r.sub.kind = TimeKind.duration;
+    r.sub.schedule = seconds(1);
+    r.sub.on_fire(getTime());
+    assert(r.fired == 1);
 }
