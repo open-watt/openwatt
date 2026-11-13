@@ -271,6 +271,10 @@ void iface_state_change(ActiveObject, StateSignal signal)
 - `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient.
 - `unsubscribe()` is idempotent — safe to call in `shutdown()` even if `startup()` never completed.
 
+- **Temporaries are never `ObjectRef`.** A generated-name, one-shot object cannot rebind. Hold it as a plain reference and null every reference on `offline`, before the temporary destroys itself.
+- **Never guard double destruction or signal re-entry.** Both are bookkeeping errors. A handler making a terminal decision on `offline` or `destroyed` deregisters immediately. A `running` check inside a signal handler is a sign to inspect the bookkeeping.
+- **Stream-bound state dies in `shutdown()`.** Reset read tails, partial frames and parser state there so a new connection cannot inherit the previous stream's bytes.
+
 #### 4. Module System
 
 Modules are the top-level organizational unit. Each module registers Collections and provides lifecycle hooks:

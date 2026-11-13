@@ -337,8 +337,6 @@ and the panel left outstanding.
   (a review probe confirmed it disarms): a module test would build its own Application, and an
   Application cannot be created twice in one process, since its destructor releases neither the page
   pool nor the event queues, intrinsics and signal providers its constructor registers.
-- **`Duration` properties print as raw nanoseconds** (`get` shows `3e+10ns` for `30s`): the value
-  reaches the console as a quantity rather than through `Duration`'s own formatting.
 - **Duration compact-format footprint**: verify with the supported target compiler and linked
   helpers. The assembly review is complete; isolated LDC 1.43 / LLVM 22 `-Oz` probes of both
   functions and their numeric tables are 528 bytes below the original on ARM968E-S, 116 bytes
@@ -470,16 +468,6 @@ one primitive (most belong in urt) and its copies deleted:
   and GTK rotation, but does not yet renegotiate a PTK on an established link.
   Add authenticated rekey transitions and retransmission tests without resetting
   receive counters when already installed key material is repeated.
-
-- **[uRT build, in passing] Respect the compiler's Tiny version flag**:
-  `platforms.mk` hard-codes `-d-version=Tiny`, so `TINY=1 COMPILER=dmd` fails
-  before compilation. Use the existing compiler-specific `VERSION_FLAG`.
-
-- **[Host build, local work] Reconcile the unfinished power regulator**:
-  The untracked `src/driver/power/regulator.d` references `ComponentEvent.materialised`,
-  `set_device_online` and `note_activity`, which are absent from the current model.
-  It is discovered by the full source build; reconcile it with the intended model
-  work before expecting this working checkout's host build to pass.
 
 - **[Windows toolchain] Retire the default beta DMD and isolate LDC COMDAT failure**:
   PATH selects DMD 2.112.0-beta.1, whose unittest build fails copy-constructor
@@ -738,10 +726,7 @@ one primitive (most belong in urt) and its copies deleted:
   `ESP_MAC_EFUSE_EXT` plus the base MAC and orders that pair the other way. Settle which order
   is on-air correct against the standard before changing anything, since the address we display
   is also the one we hand the radio.
-- **The H2 needs the soft-float processor entry the C5 and C6 got** and does not have it: it is
-  still on `e906`, which has no atomic extension, so every `__atomic_*` libcall is undefined at
-  link. IDF builds it `rv32imac` like the others. The H2 also cannot fit the full tier at all,
-  at 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
+- **The H2 cannot fit the full tier**: 2.69 MB against the 1.75 MB OTA slots of its 4 MB flash.
 
 - **WiFi coexistence on C5/C6**: the 802.15.4 radio shares the RF path with WiFi;
   `CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y` is required when both run and is not yet set.
@@ -790,9 +775,6 @@ one primitive (most belong in urt) and its copies deleted:
   trigger; a reentrant tap (Infrastructure) still reaches it.
 - **ASH and CPC do not check `alloc!Message`** (2026-11-07, #917 review): an exhausted heap is a
   null dereference in the send path instead of a counted drop.
-- **`ZigbeeInterface._ezsp_client` is a raw pointer**: destroying the EZSP client leaves the
-  interface restarting against freed memory (`startup()` reads `_ezsp_client.running`). Make it
-  an `ObjectRef!EZSPClient` per the dependency rules.
 
 ## Automation
 
@@ -927,13 +909,6 @@ decisions are in [docs/wip/SYSTEM_IO.draft.md](docs/wip/SYSTEM_IO.draft.md). The
 
 - **Byte counts carry no unit**: urt's unit encoding has no free unit type for information, so
   `system.mem` values are plain integers of bytes. A unit for bytes means widening that encoding.
-
-- **A numeric-to-text format change with history crashes the next text read**: `text_value`
-  reads the tail bucket without checking that bucket's format, so after `format` switches a
-  numeric element with recorded history to text, it takes the scalar bucket's samples as `ushort`
-  heap offsets into a heap that is null. `tail_record` likewise hands back the previous format's
-  record. Either the readers ignore a tail whose format is not the element's, or the setter
-  retires the tail.
 
 - **`bucket_capacity`/`text_bucket_capacity` do not scale with the target**: `text_heap_limit`
   now does (8k under `Tiny`, 64k otherwise), but the record-count caps declared beside it are
@@ -1565,9 +1540,6 @@ this is what remains.
   `poll_rx()`; each wants an event where its platform offers one (a reactor `watch_io` for stdin
   on Linux, the IDF drivers' callbacks).
 
-- **`BridgeStream.write` spins on a member that is not running**: it loops until each member has
-  taken all the data, and a stopped member takes nothing.
-
 - **Push-receive review follow-ups** (2026-10-06, #814):
   - A connection paused by `recv_handler(null)` does not see the peer's FIN or a reset until it
     reads again; epoll drops read interest and IOCP holds the one receive it has.
@@ -1672,14 +1644,6 @@ this is what remains.
   calls `Element.value` without checking `Access.write`, allowing CLI writes to reported
   read-only identities such as a port's `circuit`. Define whether this command is an explicit
   diagnostic override or should enforce the same write contract as clients (found in #718).
-
-- **`FEATURES=switch` does not link.** `driver/linux/bridge.d` and `driver/linux/wifi.d` import
-  `protocol.ip.linux_mirror.mirror_refresh_interface` unconditionally, but the switch tier drops
-  `protocol.ip`, so the symbol is undefined at link. Found while testing another branch on
-  2026-09-20; `IPV6=0 GATEWAY=0` builds clean, so it is this tier specifically. Gate the import
-  and its call sites on `has_ip`.
-
-- Fix `urt.conv.parse_uint` overflow: reject values outside `ulong` range using the existing zero-consumption error contract. Revision filenames use checked `parse_int_fast`.
 
 - **Finish the remaining fixes from PR #833 after a second review**: the trivial subset
   is split out. The subscriber tombstones lose a resubscribe when all eight slots are occupied;
@@ -2070,10 +2034,6 @@ this is what remains.
       the last pull stopped, so the next pull resumes in O(depth) rather than re-walking.
   - The live views (`CollectionWatchState`, `TreeViewState`) format and measure every row on every
     tick and render only the visible slice; they should format and fit only the slice.
-
-- **Document `/device` in CLI.md**: `add`, `print` (`filter=`, `--watch`, `--expand`) and
-  `/element/set` have no reference entry. A bare `print m1*` does not bind `filter`; it lands
-  in the variadic `args` and prints everything.
 
 - **Document `/protocol/mqtt/broker` in CLI.md**: the broker, its `discover` prefixes and the Home
   Assistant discovery it drives (entity mapping, writers, availability aggregated into

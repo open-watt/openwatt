@@ -2049,6 +2049,9 @@ unittest
 
     // Duration round-trips: the declared default applies, strings parse, and the box comes back as a duration
     assert(o.prop_read!(ElemTestObject, "timeout") == msecs(800));
+    char[16] text;
+    Variant boxed = o.get("timeout");
+    assert(text[0 .. boxed.toString(text, null, null)] == "800ms");
     Variant timeout = Variant("5s");
     assert(o.set("timeout", timeout));
     assert(o.prop_read!(ElemTestObject, "timeout") == seconds(5));

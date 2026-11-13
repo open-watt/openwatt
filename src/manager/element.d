@@ -1982,9 +1982,13 @@ unittest
     // a format change discards the value: the element has had none in its new format
     Element reformed;
     reformed.format = register_format(f64_held);
+    reformed.ensure_history();
     reformed.write_sample(1.0, from_unix_time_ns(1_000_000));
     reformed.format = register_format(text_held);
     assert(!reformed.has_value && reformed.record_update == SysTime());
+    assert(reformed.text_value is null && reformed.value.isNull);
+    reformed.write_sample("on", from_unix_time_ns(2_000_000));
+    assert(reformed.bucket_count == 2 && reformed.text_value == "on");
     reformed.teardown();
 
     // an empty string is a value: a store created over it starts with it as record 0
