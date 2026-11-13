@@ -2374,9 +2374,8 @@ From the PR #563 audit; the call-site rule is in AGENTS.md (pointer form only on
 ### ESP RISC-V bring-up (2026-09-20)
 
 The pinned uRT includes the single-core RISC-V critical-section and ESP task-creation
-fixes. The remaining build integration below still needs to land; in particular, the
-D-side BLE driver must agree with the ESP-IDF Bluetooth configuration. Earlier C5 hardware
-validation used additional local patches and does not validate the committed tree.
+fixes. Earlier C5 hardware validation used additional local patches and does not validate
+the committed tree.
 
 - **The C5 boot-loops, cause unknown.** The image links and the bootloader hands over, then the
   app takes a `SW_CPU` reset through `esp_restart_noos_inner` and repeats. The panic text goes to
@@ -2384,12 +2383,6 @@ validation used additional local patches and does not validate the committed tre
   with the console on UART0 builds but overflows the 3 MB slot by 31 KB with IDF logging on. The
   NimBLE init and LittleFS mounting a SPIFFS-formatted partition
   are all candidates. Get the backtrace before changing anything.
-
-- **Enable Bluetooth in the C5/C6/H2 IDF targets.** These are Bluetooth-enabled builds, but
-  their defaults set `CONFIG_BT_ENABLED=n` and their component dependencies omit `bt`.
-  Enable BT and NimBLE and include `bt`, matching the S3 target. The C5 firmware link fails
-  on NimBLE symbols with ESP-IDF v6.1 and uRT `a8fe623`; the critical-section symbols resolve.
-  This target configuration predates #732 and is a separate build fix.
 
 - Choose an H2 feature set that fits its 1.75 MiB OTA slots; the reported 2.69 MB
   full image cannot fit a dual-OTA layout on its 4 MB flash.
