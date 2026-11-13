@@ -3,12 +3,14 @@ module driver.linux.system;
 version (linux):
 
 import urt.endian : LittleEndian;
+import urt.file : sync_directory;
+import urt.internal.stdc.errno : errno, ENOENT;
 import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
 import urt.log;
 import urt.string.format : tconcat;
 import urt.time : MonoTime, getTime, msecs;
 
-import driver.system : ResetClass, ImageId, OtaImage;
+import driver.system : ResetClass, ImageId, OtaImage, ota_outcome_unknown;
 
 nothrow @nogc:
 
@@ -79,6 +81,15 @@ int ota_begin(size_t image_size, ref uint handle)
     if (!dir.length)
         return -1;
 
+    // a staged marker may name the slot we are about to overwrite; it must not survive a failed retry
+    char[4096] next_buf = void;
+    const(char)* next_path = zpath(next_buf, "openwatt.next");
+    if (!next_path || (unlink(next_path) != 0 && errno != ENOENT) || !sync_directory(dir))
+    {
+        log_error("ota", "withdraw staged slot marker failed");
+        return -1;
+    }
+
     int slot = current_slot();
     g_ota_slot = (slot >= 0 ? slot : 0) + 1;
 
@@ -128,25 +139,42 @@ int ota_end(uint handle)
 
     char[4096] final_buf = void;
     const(char)* final_path = zpath(final_buf, tconcat("openwatt.", g_ota_slot));
-    if (!final_path || rename(g_ota_part.ptr, final_path) != 0)
+    if (!final_path || rename(g_ota_part.ptr, final_path) != 0 || !sync_directory(install_dir()))
     {
         log_error("ota", "rename to slot ", g_ota_slot, " failed");
         return -1;
     }
 
     // hand the staged slot to the supervisor; it launches it on the next restart.
-    char[4096] next_buf = void;
+    char[4096] tmp_buf = void, next_buf = void;
+    const(char)* tmp_path = zpath(tmp_buf, "openwatt.next.tmp");
     const(char)* next_path = zpath(next_buf, "openwatt.next");
-    if (next_path)
+    int fd = tmp_path && next_path ? open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, mode_0755) : -1;
+    if (fd < 0)
     {
-        int fd = open(next_path, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
-        if (fd >= 0)
+        log_error("ota", "create slot marker failed");
+        return -1;
+    }
+    const(char)[] txt = tconcat(g_ota_slot, '\n');
+    bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
+    ok = close(fd) == 0 && ok;
+    if (!ok || rename(tmp_path, next_path) != 0)
+    {
+        log_error("ota", "write slot marker failed");
+        unlink(tmp_path);
+        return -1;
+    }
+    if (!sync_directory(install_dir()))
+    {
+        // the marker is published but not durable; withdraw it, or a later restart activates a failed upload
+        if (unlink(next_path) != 0 || !sync_directory(install_dir()))
         {
-            const(char)[] txt = tconcat(g_ota_slot, '\n');
-            write(fd, txt.ptr, txt.length);
-            fsync(fd);
-            close(fd);
+            log_error("ota", "slot marker sync failed and could not be withdrawn; slot ", g_ota_slot,
+                      " may activate on restart");
+            return ota_outcome_unknown;
         }
+        log_error("ota", "slot marker sync failed");
+        return -1;
     }
     log_notice("ota", "staged slot ", g_ota_slot, "; restart to apply");
     return 0;

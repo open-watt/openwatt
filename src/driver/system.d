@@ -12,6 +12,9 @@ enum ResetClass : ubyte
     deliberate,     // a reset we or the operator asked for
 }
 
+// ota_end result: staging failed, but the image may still be activated by the next restart
+enum int ota_outcome_unknown = -2;
+
 alias ImageId = ubyte[32];
 
 struct OtaImage
