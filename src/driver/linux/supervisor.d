@@ -76,6 +76,13 @@ int run_supervisor(string[] args)
     for (;;)
     {
         int pending = read_next();
+        // a commit leaves its marker in place; the app may publish a newer one while it runs, so it is
+        // retired here, with no child running, only if it still names the committed slot
+        if (pending == good)
+        {
+            clear_next();
+            pending = -1;
+        }
         bool probation = false;
         int target;
         if (pending >= 0 && fail < g_max_fail)
@@ -228,7 +235,6 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
                 committed = true;
                 good = target;
                 fail = 0;
-                clear_next();
                 slog(tconcat("slot ", target, " soaked ", g_commit_secs, "s; now good"));
             }
             else
