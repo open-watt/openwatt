@@ -688,14 +688,9 @@ one primitive (most belong in urt) and its copies deleted:
 
 - **Verify recovery on hardware**: confirm that a slave answers master heartbeats without a
   fresh announce after a link flap. If it does not, explicitly restart the announce ceremony
-  when repeated heartbeats go unanswered.
-
-- **Evict chargers that leave the bus**: `_chargers` only ever grows. A charger removed from
-  the bus keeps its stale state flag and reservation until the next master restart, withholding
-  its share of the budget; after the restart its flag is never set again, and because
-  `next_offer` holds every offer while any known charger lacks fresh state, no charger can be
-  offered more current than it already has. Its binding is also respawned on every master
-  start. Needs a presence timeout that evicts the record and its dynamic binding.
+  when repeated heartbeats go unanswered. A slave that misses 20 heartbeats is evicted and
+  rejoins only by announcing again, so also confirm that a slave which lost its master
+  resumes announcing.
 
 ## Tesla vehicle BLE
 
