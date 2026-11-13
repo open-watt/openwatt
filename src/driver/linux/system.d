@@ -3,6 +3,7 @@ module driver.linux.system;
 version (linux):
 
 import urt.endian : LittleEndian;
+import urt.file : sync_directory;
 import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
 import urt.log;
 import urt.string.format : tconcat;
@@ -128,7 +129,7 @@ int ota_end(uint handle)
 
     char[4096] final_buf = void;
     const(char)* final_path = zpath(final_buf, tconcat("openwatt.", g_ota_slot));
-    if (!final_path || rename(g_ota_part.ptr, final_path) != 0)
+    if (!final_path || rename(g_ota_part.ptr, final_path) != 0 || !sync_directory(install_dir()))
     {
         log_error("ota", "rename to slot ", g_ota_slot, " failed");
         return -1;
@@ -147,7 +148,7 @@ int ota_end(uint handle)
     const(char)[] txt = tconcat(g_ota_slot, '\n');
     bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
     ok = close(fd) == 0 && ok;
-    if (!ok || rename(tmp_path, next_path) != 0)
+    if (!ok || rename(tmp_path, next_path) != 0 || !sync_directory(install_dir()))
     {
         log_error("ota", "write slot marker failed");
         unlink(tmp_path);
