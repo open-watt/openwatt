@@ -683,6 +683,8 @@ this(I)(const I i)
 
 uRT replaces the D standard library to enable embedded targets without OS dependencies.
 
+uRT takes its compile-time tunables, such as the page classes, from the `urt_config` module. OpenWatt supplies [src/urt_config.d](src/urt_config.d) through `URT_CONFIG_DIR` in the Makefile, and uRT's own `config/urt_config.d` is the default for other consumers.
+
 
 ### Important Files & Directories
 

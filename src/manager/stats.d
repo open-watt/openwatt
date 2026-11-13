@@ -8,6 +8,7 @@ import urt.string;
 import urt.string.ascii : to_lower;
 import urt.system;
 import urt.time;
+import urt_config : page_classes;
 
 import manager;
 import manager.component;
@@ -56,7 +57,7 @@ void create_system_device()
     {
         Component pages = builder.component(mem, "pages");
         FormatId count = register_value_format!uint();
-        assert(page_pool_num_categories() == _pages.length - 1, "the stats hold small, normal and heap");
+        assert(page_pool_num_categories() == _pages.length - 1, "the stats hold each page class and the heap");
         foreach (i, ref e; _pages)
         {
             ubyte category = i + 1 < _pages.length ? cast(ubyte)i : page_category_heap;
@@ -117,7 +118,7 @@ struct PageElements
 enum bool pages_counted = __traits(compiles, page_pool_stats(0));
 
 __gshared PoolElements[MaxMemoryPools] _pools;
-__gshared PageElements[3] _pages;   // small, normal, heap
+__gshared PageElements[page_classes.length + 1] _pages;   // each page class, then the heap
 __gshared CpuElements _cpu;
 __gshared Element* _stack_peak;
 
