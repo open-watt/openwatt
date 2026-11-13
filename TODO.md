@@ -26,10 +26,6 @@ left in place they are dead weight whose reason is invisible in the code.
   a base reference (every collection free) under-reports it to `MemoryThreats` accounting on targets
   whose allocator does not report usable size (Windows, Linux, ESP); the accounted total drifts up.
   Bare-metal heaps use `_memsize` and are exact. Needs the dynamic size at free.
-- Each executed console script appears to leak about 80 bytes (two 40-byte blocks); suspected
-  `Expression` nodes from parsing, see the expression ownership rework. Measured with the
-  `ALLOC_TRACKING=1` console-restart probe after the destructor fixes; unconfirmed, because the
-  tracker cannot attribute it on Windows (next entry).
 - `urt.mem.profile.record` call-site names are garbled on Windows DMD debug builds (file names
   overwrite each other and every site resolves to one unrelated function), which makes
   `/system/alloc/leaks` unusable for attribution there.

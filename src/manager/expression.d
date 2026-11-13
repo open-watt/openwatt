@@ -144,7 +144,7 @@ nothrow @nogc:
         p = cast(inout(Payload)*)rhs.p;
     }
 
-    ~this() pure
+    ~this()
     {
         if (p && --(cast(Payload*)p).refcount == 0)
             free(cast(Payload*)p);
@@ -190,6 +190,13 @@ nothrow @nogc:
 private:
     static struct Payload
     {
+    nothrow @nogc:
+
+        ~this()
+        {
+            free_script_commands(commands);
+        }
+
         Array!char source;
         Array!ScriptCommand commands;
         uint refcount;
@@ -777,7 +784,7 @@ void free_script_command(ref ScriptCommand command)
     command.command = null;
 }
 
-private void free_script_commands(ref Array!ScriptCommand commands)
+void free_script_commands(ref Array!ScriptCommand commands)
 {
     foreach (ref command; commands)
         free_script_command(command);
@@ -1673,6 +1680,15 @@ unittest
         free_expression(quoted);
     }
 
+    version (Tiny) {} else
+    {
+        import urt.mem.reclaim : memory_in_use;
+        size_t in_use = memory_in_use();
+        {
+            Script held = make_script(":put a b=c { :put d }");
+        }
+        assert(memory_in_use() == in_use, "a script frees the expressions it parsed");
+    }
 }
 
 version (AllocProfile) unittest
