@@ -765,8 +765,9 @@ private:
 
     void get_child_date(EmberStatus status, EmberChildData childData)
     {
-        if (status == EmberStatus.SUCCESS)
-            log.debugf("child {0, 04x} [{1}] {2}", childData.id, EUI64(childData.eui64), childData.type);
+        if (status != EmberStatus.SUCCESS || !running)
+            return;
+        log.debugf("child {0, 04x} [{1}] {2}", childData.id, EUI64(childData.eui64), childData.type);
 
         auto n = get_module!ZigbeeProtocolModule.attach_node(EUI64(childData.eui64), pan_id, childData.id);
         n.parent_id = _node_id;
