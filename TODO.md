@@ -1653,13 +1653,6 @@ this is what remains.
   Telnet overflow state, Ethernet duplex, resolved endpoint reporting, Linux switch-tier gates,
   Windows UDP/uRT changes, and the remaining CLI documentation.
 
-- **Unsubscribe during packet dispatch walks a stale slice**: `BaseInterface.fire_subscribers`
-  and `send` iterate `_subscribers[0 .. _num_subscribers]` captured before the loop, and
-  `unsubscribe` swap-removes into that range. A handler that calls `restart()` (the dhcp6
-  client's declined-reply path, any offline handler) unsubscribes and re-subscribes inside the
-  walk, so the moved-in and re-added entries can receive the same packet again. Snapshot the
-  subscriber set or defer removals until the walk ends.
-
 - **Make clock-sensitive unittests hermetic**: tests that leave a `MonoTime` member at
   `MonoTime.init` and then compare it against a real `getTime()` only pass once the monotonic
   clock exceeds the interval under test, so they fail on a freshly booted CI runner. The tesla
