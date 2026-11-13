@@ -1042,7 +1042,7 @@ private Expression* parse_relational_exp(ref Parser parser)
     if (!left)
         return null;
     parser.skip_whitespace();
-    while (parser.match('<') || parser.match("<=") || parser.match('>') || parser.match(">="))
+    while (parser.match("<=") || parser.match('<') || parser.match(">=") || parser.match('>'))
     {
         version (ExpressionDebug)
             writeDebug("REL");
@@ -1575,6 +1575,13 @@ unittest
     assert(parse_expression(text).as_bool == true);
     text = "-3";
     assert(parse_expression(text).as_num == VarQuantity(-3));
+
+    text = "1 <= 1";
+    assert(parse_expression(text).as_bool == true && text.empty);
+    text = "2 >= 3";
+    assert(parse_expression(text).as_bool == false && text.empty);
+    text = "3 > 2";
+    assert(parse_expression(text).as_bool == true && text.empty);
 
     {
         const(char)[] quoted = "\"a\\nb\\rc\\td\"";
