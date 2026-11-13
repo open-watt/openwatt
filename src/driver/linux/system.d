@@ -9,7 +9,7 @@ import urt.log;
 import urt.string.format : tconcat;
 import urt.time : MonoTime, getTime, msecs;
 
-import driver.system : ResetClass, ImageId, OtaImage;
+import driver.system : ResetClass, ImageId, OtaImage, ota_outcome_unknown;
 
 nothrow @nogc:
 
@@ -148,10 +148,22 @@ int ota_end(uint handle)
     const(char)[] txt = tconcat(g_ota_slot, '\n');
     bool ok = write(fd, txt.ptr, txt.length) == txt.length && fsync(fd) == 0;
     ok = close(fd) == 0 && ok;
-    if (!ok || rename(tmp_path, next_path) != 0 || !sync_directory(install_dir()))
+    if (!ok || rename(tmp_path, next_path) != 0)
     {
         log_error("ota", "write slot marker failed");
         unlink(tmp_path);
+        return -1;
+    }
+    if (!sync_directory(install_dir()))
+    {
+        // the marker is published but not durable; withdraw it, or a later restart activates a failed upload
+        if (unlink(next_path) != 0 || !sync_directory(install_dir()))
+        {
+            log_error("ota", "slot marker sync failed and could not be withdrawn; slot ", g_ota_slot,
+                      " may activate on restart");
+            return ota_outcome_unknown;
+        }
+        log_error("ota", "slot marker sync failed");
         return -1;
     }
     log_notice("ota", "staged slot ", g_ota_slot, "; restart to apply");
