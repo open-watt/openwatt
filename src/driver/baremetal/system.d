@@ -3,6 +3,7 @@ module driver.baremetal.system;
 import urt.driver.reset : ResetCause, ResetMark, has_reset_record, has_system_reset, has_watchdog_cause, reset_cause, reset_record_mark,
     reset_record_take, system_reset;
 import urt.log;
+import urt.time : Duration;
 
 import driver.system : ResetClass, ImageId, OtaImage;
 
@@ -115,6 +116,7 @@ else
     enum bool has_download_mode = false;
 
 bool   reboot_pending() => false;
+Duration os_timezone_offset() => Duration.zero;
 bool   ota_supported() => false;
 size_t ota_partition_size() => 0;
 int    ota_begin(size_t image_size, ref uint handle) { handle = 0; return -1; }

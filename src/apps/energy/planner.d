@@ -531,7 +531,7 @@ Duration compute_time_to_deadline(TimeOfDay deadline, SysTime now)
 {
     if (deadline == TimeOfDay.init)
         return Duration.zero;
-    TimeOfDay now_tod = time_of_day(now);
+    TimeOfDay now_tod = time_of_day(get_date_time(cast(LocalTime)now));
     Duration delta = deadline - now_tod;
     if (delta.ticks < 0)
         delta = delta + dur!"hours"(24);
@@ -581,4 +581,10 @@ unittest
     graph.battery_stores[0].reading.soc = 0;
     budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
     assert(budget.battery_available_kwh == 0);
+
+    set_timezone(dur!"hours"(10));
+    scope(exit) set_timezone(Duration.zero);
+    DateTime dt = { year: 2026, month: Month.June, day: 15, hour: 20 };
+    assert(compute_time_to_deadline(TimeOfDay(7, 0, 0, 0), get_sys_time(dt)) == dur!"hours"(1));
+    assert(compute_time_to_deadline(TimeOfDay(5, 30, 0, 0), get_sys_time(dt)) == dur!"hours"(23) + dur!"minutes"(30));
 }
