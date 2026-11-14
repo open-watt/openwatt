@@ -314,6 +314,48 @@ ushort pseudo_header_checksum_v6(ref const(ubyte)[16] source, ref const(ubyte)[1
     return internet_checksum(pseudo_header[]);
 }
 
+ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
+{
+    ubyte[12] ph = void;
+    ph[0 .. 4] = src.b;
+    ph[4 .. 8] = dst.b;
+    ph[8] = 0;
+    ph[9] = protocol;
+    ph[10 .. 12] = transport_length.nativeToBigEndian;
+    return internet_checksum(ph[]);
+}
+
+// verified: the link already vouched for the checksums. A zero UDP checksum means the sender opted out (RFC 768).
+bool parse_udp4(const(ubyte)[] datagram, out const(IPv4Header)* ip, out ushort src_port, out ushort dst_port,
+                out const(ubyte)[] payload, bool verified = false) pure
+{
+    if (datagram.length < IPv4Header.sizeof + UdpHeader.sizeof)
+        return false;
+    const h = cast(const IPv4Header*)datagram.ptr;
+    size_t hdr_len = h.ihl * 4;
+    size_t total = h.total_length.bigEndianToNative!ushort;
+    if (h.version_ != 4 || hdr_len < IPv4Header.sizeof || total < hdr_len + UdpHeader.sizeof || total > datagram.length)
+        return false;
+    if (h.protocol != IPProtocol.udp || (h.flags_frag.bigEndianToNative!ushort & 0x3FFF) != 0)
+        return false;
+    if (!verified && internet_checksum(datagram[0 .. hdr_len]) != 0)
+        return false;
+
+    const(ubyte)[] segment = datagram[hdr_len .. total];
+    ushort udp_len = segment[4 .. 6][0 .. 2].bigEndianToNative!ushort;
+    if (udp_len < UdpHeader.sizeof || udp_len > segment.length)
+        return false;
+    if (!verified && (segment[6] | segment[7]) != 0
+        && internet_checksum(segment[0 .. udp_len], pseudo_header_checksum_v4(IPAddr(h.src), IPAddr(h.dst), IPProtocol.udp, udp_len)) != 0)
+        return false;
+
+    ip = h;
+    src_port = segment[0 .. 2][0 .. 2].bigEndianToNative!ushort;
+    dst_port = segment[2 .. 4][0 .. 2].bigEndianToNative!ushort;
+    payload = segment[UdpHeader.sizeof .. udp_len];
+    return true;
+}
+
 MACAddress ipv6_multicast_mac(IPv6Addr address) pure
 {
     MACAddress mac;

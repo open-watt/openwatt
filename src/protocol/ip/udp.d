@@ -16,7 +16,7 @@ import router.iface;
 import router.iface.endpoint : UdpHeader;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol, pcp_dscp;
+import protocol.ip : IPv4Header, IPProtocol, parse_udp4, pcp_dscp;
 import protocol.ip.address;
 import protocol.ip.icmp;
 import protocol.ip.igmp : igmp_join, igmp_leave;
@@ -324,34 +324,12 @@ static if (has_ipv6)
 // pkt.data is the entire IP datagram.
 void udp_input(ref IPStack stack, const(Packet)* pkt, BaseInterface iface, bool group_destination)
 {
-    if (pkt.data.length < IPv4Header.sizeof + UdpHeader.sizeof)
+    const(IPv4Header)* ip;
+    ushort src_port, dst_port;
+    const(ubyte)[] body_;
+    if (!parse_udp4(cast(const(ubyte)[])pkt.data, ip, src_port, dst_port, body_, pkt.checksum_pending || pkt.checksum_verified))
         return;
 
-    const ip = cast(const IPv4Header*)pkt.data.ptr;
-    size_t ip_hdr_len = ip.ihl * 4;
-    size_t ip_total = loadBigEndian(cast(const(ushort)*)&ip.total_length);
-    if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > pkt.data.length)
-        return;
-
-    const(ubyte)[] payload = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
-    const u = cast(const UdpHeader*)payload.ptr;
-
-    ushort udp_len = loadBigEndian(&u.length);
-    if (udp_len < UdpHeader.sizeof || udp_len > payload.length)
-        return;
-
-    // Verify checksum if present (zero means sender opted out).
-    ushort wire_csum = loadBigEndian(&u.checksum);
-    if (wire_csum != 0 && !pkt.checksum_verified)
-    {
-        ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.udp, udp_len);
-        ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
-        if (calc != 0)
-            return;     // bad checksum
-    }
-
-    ushort dst_port = loadBigEndian(&u.dst_port);
-    ushort src_port = loadBigEndian(&u.src_port);
     IPAddr dst = IPAddr(ip.dst);
     bool multicast = dst.is_multicast;
     bool broadcast = is_broadcast_for_interface(iface, dst);
@@ -392,7 +370,7 @@ void udp_input(ref IPStack stack, const(Packet)* pkt, BaseInterface iface, bool 
 
         InetAddress src = InetAddress(IPAddr(ip.src), src_port);
         InetAddress dst_address = InetAddress(dst, dst_port);
-        deliver_to_pcb(pcb, src, dst_address, iface, payload[UdpHeader.sizeof .. udp_len], pkt.creation_time);
+        deliver_to_pcb(pcb, src, dst_address, iface, body_, pkt.creation_time);
         delivered = true;
         if (!multicast && !broadcast)
             return;
@@ -669,17 +647,6 @@ static if (has_ipv6)
 
     bool zone_admits(uint bound, uint zone) pure
         => bound == 0 || bound == zone;
-}
-
-ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    align(size_t.sizeof) ubyte[12] ph = void;
-    ph[0..4]   = src.b;
-    ph[4..8]   = dst.b;
-    ph[8]      = 0;
-    ph[9]      = protocol;
-    storeBigEndian(cast(ushort*)(ph.ptr + 10), transport_length);
-    return internet_checksum(ph[]);
 }
 
 
