@@ -2158,7 +2158,12 @@ nothrow @nogc:
 
     override void deinit()
     {
-        version (UseInternalIPStack) {} else
+        version (UseInternalIPStack)
+        {
+            set_ether_tcp_input(null);
+            unregister_frame_handler(PacketType.ethernet);
+        }
+        else
         {
             // close whatever the owners left behind; the pump sweep won't run again, so free
             // what's immediately reclaimable and let cancelled in-flight ops leak at exit
