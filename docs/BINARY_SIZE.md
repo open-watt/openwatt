@@ -199,6 +199,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-08 | #931 | ldc 1.43.0 | 1,609,548 | 46,412 | 4,194,304 | EZSP requests queue in pool packets; a non-reentrant drain keeps wire order: +256 flash |
 | 2026-11-08 | c6e93df0 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | master, control for #924 |
 | 2026-11-08 | #924 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | headroom-shortfall warnings, debug builds only: no release bytes |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | master, control for E5c ASH/CPC packets |
+| 2026-11-11 | #965 | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | ASH and CPC queue the producer's packet, not a 128/256-byte buffer per message, and warn and count a drop when a message cannot be allocated: +0 flash |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

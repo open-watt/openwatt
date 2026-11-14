@@ -248,24 +248,36 @@ protected:
 
     override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
     {
-        scope (exit) packet_free(packet);
-        if (packet.type != PacketType.raw)
+        if (packet.type != PacketType.raw || packet.length > ASH_MAX_MSG_LENGTH)
+        {
+            packet_free(packet);
             return -1;
-        const(ubyte)[] message = cast(ubyte[])packet.data();
+        }
 
         // bound the tx queue; unbounded growth during a link stall just delays failure detection
         if (_tx_queue_len >= max_tx_queue)
         {
             log.warning("tx queue full (", max_tx_queue, "); rejecting frame");
             add_tx_drop();
+            packet_free(packet);
             return -1;
         }
 
-        Message* msg = alloc_message();
+        Packet* kept = packet_keep(packet);
+        Message* msg = kept ? alloc_message() : null;
+        if (!msg)
+        {
+            log.warning("out of memory; rejecting frame");
+            packet_free(kept);
+            add_tx_drop();
+            return -1;
+        }
+        msg.packet = kept;
         msg.queue_time = getTime();
-        msg.length = cast(ubyte)message.length;
-        msg.buffer[0 .. message.length] = message[];
-        if (tx_ahead() >= _max_in_flight || !send_msg(msg))
+        add_tx_frame(kept.length);
+        if (_connected && tx_ahead() < _max_in_flight)
+            send_msg(msg);
+        else
         {
             if (!_tx_queue)
                 _tx_queue = msg;
@@ -275,12 +287,9 @@ protected:
                 while (m.next)
                     m = m.next;
                 m.next = msg;
-                msg.next = null;
             }
             ++_tx_queue_len;
         }
-
-        add_tx_frame(message.length);
         return 0;
     }
 
@@ -319,15 +328,14 @@ private:
     struct Message
     {
         Message* next;
+        Packet* packet;
         MonoTime queue_time;
         MonoTime send_time;
         ubyte seq;
-        ubyte length;
         ubyte retries;
-        ubyte[ASH_MAX_MSG_LENGTH] buffer;
 
-        ubyte[] payload() pure nothrow @nogc
-            => buffer[0 .. length];
+        const(ubyte)[] payload() const nothrow @nogc
+            => cast(const(ubyte)[])packet.data;
     }
 
     ObjectRef!Stream _stream;
@@ -358,6 +366,7 @@ private:
     Message* _free_list;
     ushort _tx_queue_len;
     bool _reject_condition;
+    uint _tx_retired;   // frames acked; unlike _tx_ack, nested acks cannot bring it back to a value a caller saved
 
     size_t _rx_offset;
     uint _rx_accum;     // stream bytes seen since the last completed frame (rx-rate stats)
@@ -616,15 +625,17 @@ private:
         }
     }
 
+    // a send can deliver an ack that retires frames and queues new ones, so an ack ends the pass and the timer resends what is still due
     void resend_in_flight(MonoTime now)
     {
+        immutable uint retired = _tx_retired;
         for (Message* m = _tx_in_flight; m; m = m.next)
         {
             log.warning("retransmit seq ", m.seq, " (attempt ", m.retries + 1, " of ", _max_retransmits, ")");
             m.send_time = now;
-            if (!ash_send(m.payload(), m.seq, _rx_seq, true))
-                break;
             ++m.retries;
+            if (!ash_send(m.payload(), m.seq, _rx_seq, true) || !_connected || _tx_retired != retired)
+                break;
         }
     }
 
@@ -649,6 +660,7 @@ private:
 
             Message* msg = _tx_in_flight;
             update_time_stats(msg, timestamp);
+            ++_tx_retired;
             _tx_in_flight = _tx_in_flight.next;
             free_message(msg);
 
@@ -659,34 +671,34 @@ private:
 
     void send_queued_messages()
     {
-        while (_tx_queue && tx_ahead < _max_in_flight)
+        while (_connected && _tx_queue && tx_ahead < _max_in_flight)
         {
-            Message* next = _tx_queue.next;
-            if (!send_msg(_tx_queue))
-                break;
-            _tx_queue = next;
+            Message* msg = _tx_queue;
+            _tx_queue = msg.next;
             --_tx_queue_len;
+            send_msg(msg);
         }
     }
 
     Message* alloc_message()
     {
-        Message* msg;
-        if (_free_list)
-        {
-            msg = _free_list;
-            _free_list = _free_list.next;
-            msg.seq = 0;
-            msg.next = null;
-        }
+        Message* msg = _free_list;
+        if (msg)
+            _free_list = msg.next;
         else
+        {
             msg = alloc!Message();
-        msg.send_time = MonoTime();
+            if (!msg)
+                return null;
+        }
+        *msg = Message();
         return msg;
     }
 
     void free_message(Message* message)
     {
+        packet_free(message.packet);
+        message.packet = null;
         message.next = _free_list;
         _free_list = message;
     }
@@ -699,15 +711,12 @@ private:
         update_service_times(wait_us, service_us);
     }
 
-    bool send_msg(Message* msg)
+    // the frame is in flight before it is sent: a send the line refuses is a lost frame, which the retransmit timer resends
+    void send_msg(Message* msg)
     {
-        if (!_connected || !ash_send(msg.payload(), _tx_seq, _rx_seq, false))
-            return false;
-
         msg.next = null;
         msg.send_time = getTime();
         msg.seq = _tx_seq;
-        msg.retries = 0;
         if (!_tx_in_flight)
             _tx_in_flight = msg;
         else
@@ -718,8 +727,7 @@ private:
             m.next = msg;
         }
         _tx_seq = (_tx_seq + 1) & 7;
-
-        return true;
+        ash_send(msg.payload(), msg.seq, _rx_seq, false);
     }
 
     bool ash_ack(ubyte ack, bool ready, bool nak = false)
@@ -860,6 +868,11 @@ unittest
         override ptrdiff_t transmit(const(void)[] data)
         {
             output ~= cast(const(ubyte)[])data;
+            if (auto hook = on_transmit)
+            {
+                on_transmit = null;
+                hook();
+            }
             return data.length;
         }
         void push(const(void)[] data)
@@ -867,6 +880,7 @@ unittest
             incoming(data, getTime());
         }
         Array!ubyte output;
+        void delegate() nothrow @nogc on_transmit;
     }
 
     Line line = Collection!Line().create("ash-test-line");
@@ -1115,5 +1129,105 @@ unittest
         assert(client.send_command!EZSP_GetConfigurationValue(&waiting.read_for, EzspConfigId.NEIGHBOR_TABLE_SIZE, &waiting));
         client.restart();
         assert(sent.calls == 1 && waiting.calls == 1 && client.queued_count == 0);
+
+        // the link going down under a send, or under a retransmit, leaves nothing linked and its frames released
+        Line line2 = Collection!Line().create("ash-reenter-line");
+        foreach (_; 0 .. 2)
+            Collection!Stream().update_all();
+        ASHInterface link2 = Collection!ASHInterface().create("ash-reenter", ObjectFlags.none, NamedArgument("stream", line2));
+        scope (exit)
+        {
+            link2.destroy();
+            line2.destroy();
+            foreach (_; 0 .. 4)
+            {
+                Collection!BaseInterface().update_all();
+                Collection!Stream().update_all();
+            }
+        }
+        static struct Restarter
+        {
+        nothrow @nogc:
+            void restart()
+            {
+                link.restart();
+            }
+            ASHInterface link;
+        }
+        Restarter restarter = Restarter(link2);
+        foreach (nak; [false, true])
+        {
+            Collection!BaseInterface().update_all();
+            ncp_frame(line2, 0xC1, rstack[]);
+            Collection!BaseInterface().update_all();
+            assert(link2.running && link2._connected);
+            foreach (_; 0 .. 4)
+                assert(link2.forward(alloc_packet!RawFrame(request[])) == 0);
+            assert(link2.tx_ahead() == 3 && link2._tx_queue_len == 1);
+            line2.on_transmit = &restarter.restart;
+            ncp_frame(line2, nak ? 0xA0 : 0x81, null);
+            assert(!link2._connected && !link2._tx_in_flight && !link2._tx_queue && !link2._tx_queue_len);
+            for (ASHInterface.Message* m = link2._free_list; m; m = m.next)
+                assert(!m.packet);
+        }
+
+        // an ack delivered under a retransmit ends the pass: the frames it queues go out fresh, and the timer resends what is still due
+        static struct Acker
+        {
+        nothrow @nogc:
+            void ack()
+            {
+                ubyte control = controls[sent++];
+                if (sent < count)
+                    line.on_transmit = &ack;
+                ncp_frame(line, control, null);
+            }
+            Line line;
+            ubyte[2] controls;
+            uint count, sent;
+        }
+        Acker acker = Acker(line2, [ 0x82, 0 ], 1);
+        Collection!BaseInterface().update_all();
+        ncp_frame(line2, 0xC1, rstack[]);
+        Collection!BaseInterface().update_all();
+        assert(link2.running && link2._connected);
+        foreach (_; 0 .. 3)
+            assert(link2.forward(alloc_packet!RawFrame(request[])) == 0);
+        ncp_frame(line2, 0x81, null);
+        assert(link2._tx_in_flight.seq == 1 && link2._free_list && !link2._free_list.packet);
+        line2.on_transmit = &acker.ack;
+        link2._ack_timeout_ms = 0;
+        link2.update();
+        assert(link2._tx_in_flight && link2._tx_in_flight.seq == 2 && !link2._tx_in_flight.next && link2._tx_in_flight.retries == 0);
+        link2.update();
+        assert(link2._tx_in_flight.seq == 2 && link2._tx_in_flight.retries == 1);
+
+        void reconnect()
+        {
+            link2.restart();
+            Collection!BaseInterface().update_all();
+            ncp_frame(line2, 0xC1, rstack[]);
+            Collection!BaseInterface().update_all();
+            assert(link2.running && link2._connected);
+            link2._max_in_flight = 7;
+        }
+        foreach (acks; [ 1, 2 ])
+        {
+            // fifteen messages exist, so fourteen submitted leave one spare to recycle
+            reconnect();
+            foreach (_; 0 .. 15)
+                assert(link2.forward(alloc_packet!RawFrame(request[])) == 0);
+            reconnect();
+            foreach (_; 0 .. 14)
+                assert(link2.forward(alloc_packet!RawFrame(request[])) == 0);
+            assert(link2.tx_ahead() == 7 && link2._tx_queue_len == 7);
+            acker = Acker(line2, [ 0x87, 0x80 ], acks);
+            line2.on_transmit = &acker.ack;
+            link2.update();
+            uint fresh;
+            for (ASHInterface.Message* m = link2._tx_in_flight; m; m = m.next, ++fresh)
+                assert(m.packet && m.retries == 0, "frames queued under a retransmit go out fresh, though their sequence numbers wrap onto the batch's");
+            assert(acker.sent == acks && fresh == 8 - acks && !link2._tx_queue_len);
+        }
     }
 }
