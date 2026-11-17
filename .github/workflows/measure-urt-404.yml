@@ -1,0 +1,88 @@
+name: Measure uRT 404 RP2350
+on:
+  push:
+    branches: [codex/measure-urt404-20261118]
+permissions:
+  contents: read
+jobs:
+  measure:
+    name: RP2350 ${{ matrix.variant }} Tiny=${{ matrix.tiny }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {variant: master, tiny: 0}
+          - {variant: master, tiny: 1}
+          - {variant: old404, tiny: 0}
+          - {variant: old404, tiny: 1}
+          - {variant: trimmed-static, tiny: 0}
+          - {variant: trimmed-static, tiny: 1}
+          - {variant: trimmed-loop, tiny: 1}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+      - uses: ./.github/actions/apt-install
+        with:
+          key: arm-none-eabi
+          packages: gcc-arm-none-eabi picolibc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Select runtime
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          case "$VARIANT" in
+            master) rev=037bd3c147532e819f39f5b71e3c41a99d317b6d ;;
+            old404) rev=381473d573e454c28cce45cd31f3360643399fca ;;
+            *) rev=b2436e37f371a6fd936769ab6ac7c070759ef33a ;;
+          esac
+          git -C third_party/urt fetch origin "$rev"
+          git -C third_party/urt checkout --detach FETCH_HEAD
+          mkdir -p measurement
+          git rev-parse HEAD > measurement/openwatt-head.txt
+          git -C third_party/urt rev-parse HEAD > measurement/urt-head.txt
+          ldc2 --version > measurement/compiler.txt
+          arm-none-eabi-gcc --version >> measurement/compiler.txt
+          if [ "$VARIANT" = trimmed-loop ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('third_party/urt/src/urt/mem/pagepool_tiny.d')
+          s = p.read_text()
+          a = '''        ubyte category = num_classes;
+                  static foreach (ubyte i; 0 .. num_classes)
+                  {
+                      if (required <= page_size(i))
+                      {
+                          category = i;
+                          goto selected;
+                      }
+                  }
+              selected:'''
+          b = '''        ubyte category = 0;
+                  while (category < num_classes && required > page_size(category))
+                      ++category;'''
+          assert s.count(a) == 1
+          p.write_text(s.replace(a, b))
+          PY
+          fi
+          printf 'include Makefile\noverride DFLAGS += -L--Map=$(abspath measurement/image.map)\n' > measurement.mk
+      - name: Build final image
+        env:
+          TINY_MODE: ${{ matrix.tiny }}
+        run: |
+          set -o pipefail
+          make -f measurement.mk -j2 PLATFORM=rp2350 CONFIG=release TINY="$TINY_MODE" 2>&1 | tee measurement/build.log
+          arm-none-eabi-size -B bin/rp2350_release/openwatt | tee measurement/size.txt
+          arm-none-eabi-nm -S --size-sort bin/rp2350_release/openwatt > measurement/symbols.txt
+          sha256sum bin/rp2350_release/fw.bin > measurement/sha256.txt
+          cp bin/rp2350_release/fw.bin measurement/
+          cp bin/rp2350_release/openwatt measurement/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rp2350-${{ matrix.variant }}-tiny${{ matrix.tiny }}
+          path: measurement/
