@@ -51,13 +51,16 @@ jobs:
           python3 .github/scripts/measure-404-variant.py "$VARIANT"
           git -C third_party/urt diff > measurement/runtime.diff
           cp third_party/urt/src/urt/mem/pagepool*.d measurement/
-          printf 'include Makefile\noverride DFLAGS += -L--Map=$(abspath measurement/image.map)\n' > measurement.mk
+          printf 'include Makefile\noverride APP_SOURCES := $(sort $(APP_SOURCES))\noverride URT_SOURCES := $(sort $(URT_SOURCES))\noverride DFLAGS += -L--Map=$(abspath measurement/image.map)\n' > measurement.mk
       - name: Build final image
         env:
           TINY_MODE: ${{ matrix.tiny }}
         run: |
           set -o pipefail
           make -f measurement.mk -j2 PLATFORM=rp2350 CONFIG=release TINY="$TINY_MODE" 2>&1 | tee measurement/build.log
+          cp obj/rp2350_release/sources.rsp measurement/sources.rsp
+          cp obj/rp2350_release/build.flags measurement/build.flags
+          cp measurement.mk measurement/measurement.mk
           arm-none-eabi-size -B bin/rp2350_release/openwatt | tee measurement/size.txt
           arm-none-eabi-nm -S --size-sort bin/rp2350_release/openwatt > measurement/symbols.txt
           sha256sum bin/rp2350_release/fw.bin > measurement/sha256.txt
