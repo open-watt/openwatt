@@ -109,7 +109,8 @@ nothrow @nogc:
         _remote = InetAddress();
         _peer_flags &= ~PeerFlags.remote_bound;
         _remote_addr = InetAddress();
-        mark_set!(typeof(this), [ "transport", "remote" ])();
+        mark_set!(typeof(this), "transport")();
+        mark_unset!(typeof(this), "remote")();
         restart();
     }
 
@@ -129,7 +130,8 @@ nothrow @nogc:
         _remote = value;
         _peer_flags &= ~PeerFlags.remote_bound;
         _remote_addr = InetAddress();
-        mark_set!(typeof(this), [ "transport", "remote" ])();
+        mark_set!(typeof(this), "remote")();
+        mark_unset!(typeof(this), "transport")();
         restart();
         return null;
     }
