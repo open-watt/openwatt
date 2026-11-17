@@ -469,10 +469,13 @@ nothrow @nogc:
         console.set_prompt(StringLit!"> ");
 
         apply_factory_hostname();
+        apply_timezone();
 
         console.register_command!log_level("/system", this);
         console.register_command!set_hostname("/system", this);
         console.register_command!(get_hostname, "hostname")("/system", this);
+        console.register_command!(configure_timezone, "set-timezone")("/system", this);
+        console.register_command!(get_timezone, "timezone")("/system", this);
         console.register_command!(set_update_rate, "update-rate")("/system", this);
         console.register_command!(set_profile_path, "profile-path")("/system", this);
         console.register_command!uptime("/system", this);
@@ -1587,6 +1590,7 @@ private:
         MonoTime now = getTime();
         foreach (handler; _heartbeat_handlers)
             handler(now);
+        poll_timezone(now);
 
         MonoTime next = scheduled + 1.seconds;
         now = getTime();

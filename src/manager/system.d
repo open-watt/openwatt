@@ -116,6 +116,39 @@ void get_hostname(Session session)
     session.write_line(hostname);
 }
 
+__gshared Nullable!Duration timezone_override;
+
+void configure_timezone(Session session, Nullable!Duration offset)
+{
+    timezone_override = offset;
+    g_app.config_dirty = true;
+    apply_timezone();
+}
+
+void get_timezone(Session session)
+{
+    session.write_line(_timezone, timezone_override ? "" : " (os)");
+}
+
+void apply_timezone()
+{
+    import driver.system : os_timezone_offset;
+
+    Duration offset = timezone_override ? timezone_override.value : os_timezone_offset();
+    if (offset == _timezone)
+        return;
+    _timezone = offset;
+    set_timezone(offset);
+}
+
+void poll_timezone(MonoTime now)
+{
+    if (now - _timezone_polled < 60.seconds)
+        return;
+    _timezone_polled = now;
+    apply_timezone();
+}
+
 void uptime(Session session)
 {
     session.write_line(getAppTime());
@@ -533,6 +566,8 @@ auto sleep(Session session, Duration duration)
 private:
 
 __gshared ulong _node_id;
+__gshared Duration _timezone;
+__gshared MonoTime _timezone_polled;
 enum node_id_path = "conf/node.id";
 
 const(char)[] format_node_id()

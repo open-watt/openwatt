@@ -9,6 +9,7 @@ import urt.time;
 import manager : g_app, get_module;
 import manager.plugin;
 import manager.signal;
+import manager.system : apply_timezone;
 
 nothrow @nogc:
 
@@ -59,6 +60,7 @@ nothrow @nogc:
         s.schedule = spec.schedule;
         s.at = spec.at;
         s.when = spec.when;
+        s.when_has_tz = spec.when_has_tz;
         s.days_mask = spec.days_mask;
         s.repeat = spec.repeat;
 
@@ -92,7 +94,8 @@ nothrow @nogc:
     TimeKind kind;
     Duration schedule;
     TimeOfDay at;
-    SysTime when;
+    DateTime when;
+    bool when_has_tz;
     ubyte days_mask = 0x7F;
     bool repeat = true;
 
@@ -101,13 +104,10 @@ nothrow @nogc:
 
     void arm()
     {
-        SysTime now = getSysTime();
-        final switch (kind)
-        {
-            case TimeKind.duration: _next = now + schedule; break;
-            case TimeKind.tod:      _next = next_occurrence(now, at, days_mask); break;
-            case TimeKind.absolute: _next = when; break;
-        }
+        if (kind == TimeKind.duration)
+            _next = getSysTime() + schedule;
+        else
+            advance_wallclock(getSysTime());
 
         _done = false;
         schedule_fire(getTime());
@@ -138,9 +138,11 @@ nothrow @nogc:
 
 private:
     SysTime _next;
+    Duration _offset;
     bool _fire_scheduled;
     bool _wc_subscribed;
     bool _done;
+    bool _settling;
 
     void schedule_fire(MonoTime anchor)
     {
@@ -165,9 +167,13 @@ private:
     void on_fire(MonoTime scheduled)
     {
         _fire_scheduled = false;
-
-        SignalEvent ev = { source: "time" };
-        sink(scheduled, ev);
+        if (_done)
+            return;
+        if (kind != TimeKind.duration && !due(getSysTime()))
+        {
+            schedule_fire(getTime());
+            return;
+        }
 
         bool one_shot = false;
         final switch (kind)
@@ -183,29 +189,85 @@ private:
             case TimeKind.tod:
                 one_shot = !repeat;
                 if (!one_shot)
-                    _next = next_occurrence(getSysTime(), at, days_mask);
+                    advance_wallclock(getSysTime());
                 break;
         }
 
         if (one_shot)
             _done = true;
-        else
+
+        // consumed before emitting: a clock or timezone change made by the action re-arms only the next one
+        SignalEvent ev = { source: "time" };
+        sink(scheduled, ev);
+
+        if (!_done && !_fire_scheduled)
             schedule_fire(scheduled);
     }
 
     void on_wallclock_change(Duration)
     {
-        if (_done)
+        if (_done || _settling)
             return;
         if (_fire_scheduled)
         {
             g_app.cancel(&on_fire);
             _fire_scheduled = false;
         }
-        if (kind == TimeKind.tod)
-            _next = next_occurrence(getSysTime(), at, days_mask);
+        retime(getSysTime());
         schedule_fire(getTime());
     }
+
+    void advance_wallclock(SysTime now)
+    {
+        _offset = local_offset(now);
+        if (kind == TimeKind.absolute)
+            _next = when_has_tz ? get_sys_time(when) : cast(SysTime)get_local_time(when);
+        else
+            _next = next_local_occurrence(now, at, days_mask);
+    }
+
+    // a timezone change keeps the pending occurrence's wall time, so an occurrence the
+    // change jumps over fires late rather than being lost; a UTC step recomputes from now
+    void retime(SysTime now)
+    {
+        if (!rebase(now))
+            advance_wallclock(now);
+    }
+
+    bool rebase(SysTime now)
+    {
+        Duration offset = local_offset(now);
+        if (offset == _offset)
+            return false;
+        if (kind == TimeKind.tod)
+        {
+            _next = _next + (_offset - offset);
+            _offset = offset;
+        }
+        else
+            advance_wallclock(now);
+        return true;
+    }
+
+    // the minute poll can lag an offset change, so settle it before consuming an occurrence;
+    // the rebase is done here rather than by the change notification this raises
+    bool due(SysTime now)
+    {
+        _settling = true;
+        apply_timezone();
+        _settling = false;
+        rebase(now);
+        return _next <= now;
+    }
+}
+
+Duration local_offset(SysTime now)
+    => SysTime((cast(LocalTime)now).ticks) - now;
+
+SysTime next_local_occurrence(SysTime now, TimeOfDay at, ubyte days_mask)
+{
+    SysTime wall = next_occurrence(SysTime((cast(LocalTime)now).ticks), at, days_mask);
+    return cast(SysTime)LocalTime(wall.ticks);
 }
 
 struct TimeSpec
@@ -213,7 +275,8 @@ struct TimeSpec
     TimeKind kind;
     Duration schedule;
     TimeOfDay at;
-    SysTime when;
+    DateTime when;
+    bool when_has_tz;
     ubyte days_mask = 0x7F;
     bool repeat = true;
 }
@@ -237,7 +300,7 @@ StringResult parse_time(ref const SignalUri uri, out TimeSpec spec)
                 spec.days_mask = parse_days(d);
             break;
         case "when":
-            if (spec.when.fromString(uri.body) != cast(ptrdiff_t)uri.body.length)
+            if (spec.when.from_string(uri.body, spec.when_has_tz) != cast(ptrdiff_t)uri.body.length)
                 return StringResult(tconcat("bad date/time: ", uri.body));
             spec.kind = TimeKind.absolute;
             break;
@@ -273,4 +336,145 @@ ubyte parse_days(const(char)[] s)
         }
     }
     return mask ? mask : 0x7F;
+}
+
+unittest
+{
+    set_timezone(dur!"hours"(10));
+    scope(exit) set_timezone(Duration.zero);
+
+    DateTime dt = { year: 2026, month: Month.June, day: 15, hour: 7, minute: 30 };
+    SysTime now = get_sys_time(dt);
+    DateTime next = get_date_time(next_local_occurrence(now, TimeOfDay(18, 0, 0, 0), 0x7F));
+    assert(next.day == 15 && next.hour == 8 && next.minute == 0);
+    next = get_date_time(next_local_occurrence(now, TimeOfDay(17, 0, 0, 0), 0x7F));
+    assert(next.day == 16 && next.hour == 7);
+    next = get_date_time(next_local_occurrence(now, TimeOfDay(18, 0, 0, 0), 1 << Weekday.wed));
+    assert(next.day == 17 && next.hour == 8);
+
+    TimeSpec spec;
+    SignalUri uri = SignalUri("when", "2026-06-16T00:00:00");
+    assert(parse_time(uri, spec));
+    assert(!spec.when_has_tz && cast(SysTime)get_local_time(spec.when) == get_sys_time(dt) + dur!"hours"(6) + dur!"minutes"(30));
+    uri.body = "2026-06-16T00:00:00Z";
+    assert(parse_time(uri, spec));
+    assert(spec.when_has_tz && get_sys_time(spec.when) == get_sys_time(dt) + dur!"hours"(16) + dur!"minutes"(30));
+
+    TimeSub s = alloc!TimeSub();
+    scope(exit) free(s);
+    s.kind = TimeKind.tod;
+    DateTime day = { year: 2026, month: Month.March, day: 29 };
+
+    // spring forward, UTC+1 -> +2 at 01:00 UTC, seen by the poll at 01:00:30
+    set_timezone(dur!"hours"(1));
+    s.at = TimeOfDay(3, 0, 0, 0);
+    s.advance_wallclock(get_sys_time(day));
+    assert(s._next == get_sys_time(day) + dur!"hours"(2));
+    set_timezone(dur!"hours"(2));
+    SysTime seen = get_sys_time(day) + dur!"hours"(1) + dur!"seconds"(30);
+    s.retime(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(1));
+    s.advance_wallclock(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(25));
+
+    // the 02:30 the jump skips fires at the first moment after the gap
+    set_timezone(dur!"hours"(1));
+    s.at = TimeOfDay(2, 30, 0, 0);
+    s.advance_wallclock(get_sys_time(day));
+    set_timezone(dur!"hours"(2));
+    s.retime(seen);
+    assert(s._next <= seen);
+    s.advance_wallclock(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(24) + dur!"minutes"(30));
+
+    // fall back, UTC+2 -> +1 at 01:00 UTC; the repeated 02:30 fires once
+    set_timezone(dur!"hours"(2));
+    s.advance_wallclock(get_sys_time(day));
+    assert(s._next == get_sys_time(day) + dur!"minutes"(30));
+    s.advance_wallclock(s._next);
+    set_timezone(dur!"hours"(1));
+    s.retime(seen);
+    assert(s._next == get_sys_time(day) + dur!"hours"(25) + dur!"minutes"(30));
+
+    // an unchanged offset (a UTC step) recomputes from now
+    s.retime(get_sys_time(day) + dur!"hours"(30));
+    assert(s._next == get_sys_time(day) + dur!"hours"(49) + dur!"minutes"(30));
+
+    // zone-less when: in the gap also fires as soon as the change is seen
+    set_timezone(dur!"hours"(1));
+    s.kind = TimeKind.absolute;
+    s.when = day;
+    s.when.hour = 2;
+    s.when.minute = 30;
+    s.advance_wallclock(get_sys_time(day));
+    set_timezone(dur!"hours"(2));
+    s.retime(seen);
+    assert(s._next <= seen);
+
+    // fall back reaching the fire before the poll: due at the transition instant, OS already +1
+    import manager.system : timezone_override;
+    scope(exit)
+    {
+        timezone_override = Duration.zero;
+        apply_timezone();
+        timezone_override = null;
+    }
+    SysTime edge = get_sys_time(day) + dur!"hours"(1);
+    s.kind = TimeKind.tod;
+    s.at = TimeOfDay(3, 0, 0, 0);
+    s.when.hour = 3;
+    s.when.minute = 0;
+    foreach (kind; [ TimeKind.tod, TimeKind.absolute ])
+    {
+        timezone_override = dur!"hours"(2);
+        apply_timezone();
+        s.kind = kind;
+        s.advance_wallclock(get_sys_time(day));
+        assert(s._next == edge);
+        timezone_override = dur!"hours"(1);
+        assert(!s.due(edge));
+        assert(s._next == edge + dur!"hours"(1));
+        assert(s.due(edge + dur!"hours"(1)));
+    }
+
+    // an action that changes the timezone emits its occurrence once; the probe stands in for the
+    // change notification, which re-arms the sub as on_wallclock_change would without an app
+    static struct Probe
+    {
+    nothrow @nogc:
+        TimeSub s;
+        int count;
+        void emit(MonoTime, ref const SignalEvent)
+        {
+            ++count;
+            timezone_override = dur!"hours"(count & 1 ? 11 : 10);
+            apply_timezone();
+            if (s._done)
+                return;
+            s.retime(getSysTime());
+            s._fire_scheduled = true;
+        }
+    }
+    Probe probe = Probe(s);
+    s.sink = &probe.emit;
+    timezone_override = dur!"hours"(10);
+    apply_timezone();
+
+    s.kind = TimeKind.absolute;
+    s.when_has_tz = true;
+    s.when = get_date_time(getSysTime() - dur!"seconds"(1));
+    s.advance_wallclock(getSysTime());
+    s.on_fire(getTime());
+    s.on_fire(getTime());
+    assert(probe.count == 1 && s._done);
+
+    s._done = false;
+    s.kind = TimeKind.tod;
+    s.at = time_of_day(get_date_time(get_local_time() + dur!"hours"(12)));
+    s.advance_wallclock(getSysTime());
+    s._next = getSysTime();
+    probe.count = 0;
+    s.on_fire(getTime());
+    assert(probe.count == 1 && s._fire_scheduled);
+    assert(!s.due(getSysTime()));
 }
