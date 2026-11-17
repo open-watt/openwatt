@@ -12,8 +12,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {variant: rebased-old404, tiny: 0}
-          - {variant: rebased-old404, tiny: 1}
+          - {variant: base404, tiny: 0}
+          - {variant: base404, tiny: 1}
+          - {variant: item1, tiny: 0}
+          - {variant: item1, tiny: 1}
+          - {variant: item2, tiny: 0}
+          - {variant: item2, tiny: 1}
+          - {variant: combined-loop, tiny: 0}
+          - {variant: combined-loop, tiny: 1}
+          - {variant: combined-static, tiny: 1}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -31,10 +38,8 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           case "$VARIANT" in
-            master) rev=037bd3c147532e819f39f5b71e3c41a99d317b6d ;;
-            old404) rev=381473d573e454c28cce45cd31f3360643399fca ;;
-            rebased-old404) rev=ea5396175877eb20368a0741a331571808a8c9c9 ;;
-            *) rev=b2436e37f371a6fd936769ab6ac7c070759ef33a ;;
+            base404|item1|item2) rev=ea5396175877eb20368a0741a331571808a8c9c9 ;;
+            *) rev=9d77771155d8820c8a961de345e5f6f7365cc183 ;;
           esac
           git -C third_party/urt fetch origin "$rev"
           git -C third_party/urt checkout --detach FETCH_HEAD
@@ -43,28 +48,9 @@ jobs:
           git -C third_party/urt rev-parse HEAD > measurement/urt-head.txt
           ldc2 --version > measurement/compiler.txt
           arm-none-eabi-gcc --version >> measurement/compiler.txt
-          if [ "$VARIANT" = trimmed-loop ]; then
-            python3 - <<'PY'
-          from pathlib import Path
-          p = Path('third_party/urt/src/urt/mem/pagepool_tiny.d')
-          s = p.read_text()
-          a = '''        ubyte category = num_classes;
-                  static foreach (ubyte i; 0 .. num_classes)
-                  {
-                      if (required <= page_size(i))
-                      {
-                          category = i;
-                          goto selected;
-                      }
-                  }
-              selected:'''
-          b = '''        ubyte category = 0;
-                  while (category < num_classes && required > page_size(category))
-                      ++category;'''
-          assert s.count(a) == 1
-          p.write_text(s.replace(a, b))
-          PY
-          fi
+          python3 .github/scripts/measure-404-variant.py "$VARIANT"
+          git -C third_party/urt diff > measurement/runtime.diff
+          cp third_party/urt/src/urt/mem/pagepool*.d measurement/
           printf 'include Makefile\noverride DFLAGS += -L--Map=$(abspath measurement/image.map)\n' > measurement.mk
       - name: Build final image
         env:
