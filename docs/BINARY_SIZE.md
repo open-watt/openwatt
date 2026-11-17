@@ -57,6 +57,14 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 
 ## Configurations
 
+### x86_64 Windows, `make COMPILER=ldc CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-18 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | matched #947 master baseline |
+| 2026-11-18 | 0142be42 | ldc 1.43.0 | 3,890,832 | 153,592 | - | #947 before cleanup; +2,868 B vs cd7edf82 |
+| 2026-11-18 | #947 | ldc 1.43.0 | 3,888,924 | 153,592 | - | shared transmit body and style cleanup; +960 B vs cd7edf82, RAM unchanged |
+
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
@@ -201,6 +209,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-08 | #924 | ldc 1.43.0 | 1,609,292 | 46,412 | 4,194,304 | headroom-shortfall warnings, debug builds only: no release bytes |
 | 2026-11-11 | 8a145cbd | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | master, control for E5c ASH/CPC packets |
 | 2026-11-11 | #965 | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | ASH and CPC queue the producer's packet, not a 128/256-byte buffer per message, and warn and count a drop when a message cannot be allocated: +0 flash |
+| 2026-11-18 | #947 (d5dd6cca) | ldc 1.43.0 | 1,609,348 | 46,412 | 4,194,304 | matched release vs cd7edf82 (1,609,268 B); +80 B, RAM unchanged |
+
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
