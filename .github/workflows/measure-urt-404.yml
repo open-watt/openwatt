@@ -12,13 +12,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {variant: master, tiny: 0}
-          - {variant: master, tiny: 1}
-          - {variant: old404, tiny: 0}
-          - {variant: old404, tiny: 1}
-          - {variant: trimmed-static, tiny: 0}
-          - {variant: trimmed-static, tiny: 1}
-          - {variant: trimmed-loop, tiny: 1}
+          - {variant: rebased-old404, tiny: 0}
+          - {variant: rebased-old404, tiny: 1}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -38,6 +33,7 @@ jobs:
           case "$VARIANT" in
             master) rev=037bd3c147532e819f39f5b71e3c41a99d317b6d ;;
             old404) rev=381473d573e454c28cce45cd31f3360643399fca ;;
+            rebased-old404) rev=ea5396175877eb20368a0741a331571808a8c9c9 ;;
             *) rev=b2436e37f371a6fd936769ab6ac7c070759ef33a ;;
           esac
           git -C third_party/urt fetch origin "$rev"
