@@ -66,6 +66,6 @@ elif variant == 'combined-loop':
     assert old in tiny
     tiny = tiny.replace(old, new)
 else:
-    assert variant in ['base404', 'combined-static']
+    assert variant in ['base404', 'combined-static', 'master']
 p.write_text(s)
 t.write_text(tiny)
