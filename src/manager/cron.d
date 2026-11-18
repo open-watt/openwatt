@@ -227,6 +227,8 @@ StringResult parse_time(ref const SignalUri uri, out TimeSpec spec)
         case "every":
             if (spec.schedule.fromString(uri.body) != cast(ptrdiff_t)uri.body.length)
                 return StringResult(tconcat("bad duration: ", uri.body));
+            if (spec.schedule <= Duration.zero)
+                return StringResult("duration must be positive");
             spec.kind = TimeKind.duration;
             break;
         case "at":
@@ -273,4 +275,18 @@ ubyte parse_days(const(char)[] s)
         }
     }
     return mask ? mask : 0x7F;
+}
+
+unittest
+{
+    SignalUri uri = { scheme: "every" };
+    TimeSpec spec;
+    foreach (body; ["0s", "-1s"])
+    {
+        uri.body = body;
+        assert(!parse_time(uri, spec));
+    }
+    uri.body = "1ms";
+    assert(parse_time(uri, spec));
+    assert(spec.kind == TimeKind.duration && spec.schedule == 1.msecs);
 }
