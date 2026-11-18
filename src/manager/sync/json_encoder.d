@@ -605,23 +605,21 @@ nothrow @nogc:
 
     // Inbound
 
-    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         Variant parsed = parse_json(cast(char[])cast(const(char)[])frame);
         if (!parsed.isArray)
             return dispatch_message(peer, parsed);
         for (size_t i = 0; i < parsed.length(); ++i)
-            if (!dispatch_message(peer, parsed[i]))
-                return false;
-        return true;
+            dispatch_message(peer, parsed[i]);
     }
 
-    bool dispatch_message(SyncPeer peer, ref Variant json)
+    void dispatch_message(SyncPeer peer, ref Variant json)
     {
         if (!json.isObject)
         {
             log.warning("frame is not a JSON object");
-            return true;
+            return;
         }
 
         // a required field absent or mistyped drops the whole frame; optional fields default only when absent
@@ -713,7 +711,7 @@ nothrow @nogc:
         if (bad_frame || kind_str.length == 0)
         {
             log.warning("frame missing 'kind' field");
-            return true;
+            return;
         }
 
         switch (kind_str)
@@ -1097,12 +1095,11 @@ nothrow @nogc:
                     }
                 }
                 if (bad_frame)
-                    break;   // a malformed val is consumed whole; false is reserved for the add-in-flight race
+                    break;
                 for (size_t i = 0; i < smp.length(); ++i)
                 {
                     ref Variant pair = (*smp)[i];
-                    if (!sync.inbound_val(peer, h, pair[1], pair[0].asUlong()))
-                        return false;
+                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong());
                 }
                 break;
             }
@@ -1243,7 +1240,6 @@ nothrow @nogc:
                 log.warning("unknown kind: ", kind_str);
                 break;
         }
-        return true;
     }
 
     // For bind: iterate the frame's "props" object (if present) and emit one
