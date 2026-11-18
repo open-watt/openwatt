@@ -298,12 +298,12 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override bool encode_log(SyncPeer peer, const(char)[] line)
+    override bool encode_log(SyncPeer peer, const(char)[] line, bool loss_notice = false)
     {
         begin_frame("log");
         _buf.append(",\"msg\":");
         write_str(line);
-        return send_frame(peer, TxQueue.log) >= 0;
+        return peer.discard_log(_buf.length + 1, true, loss_notice) || send_frame(peer, TxQueue.log) >= 0;
     }
 
     override void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq)
@@ -605,23 +605,21 @@ nothrow @nogc:
 
     // Inbound
 
-    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         Variant parsed = parse_json(cast(char[])cast(const(char)[])frame);
         if (!parsed.isArray)
             return dispatch_message(peer, parsed);
         for (size_t i = 0; i < parsed.length(); ++i)
-            if (!dispatch_message(peer, parsed[i]))
-                return false;
-        return true;
+            dispatch_message(peer, parsed[i]);
     }
 
-    bool dispatch_message(SyncPeer peer, ref Variant json)
+    void dispatch_message(SyncPeer peer, ref Variant json)
     {
         if (!json.isObject)
         {
             log.warning("frame is not a JSON object");
-            return true;
+            return;
         }
 
         // a required field absent or mistyped drops the whole frame; optional fields default only when absent
@@ -713,7 +711,7 @@ nothrow @nogc:
         if (bad_frame || kind_str.length == 0)
         {
             log.warning("frame missing 'kind' field");
-            return true;
+            return;
         }
 
         switch (kind_str)
@@ -1097,12 +1095,11 @@ nothrow @nogc:
                     }
                 }
                 if (bad_frame)
-                    break;   // a malformed val is consumed whole; false is reserved for the add-in-flight race
+                    break;
                 for (size_t i = 0; i < smp.length(); ++i)
                 {
                     ref Variant pair = (*smp)[i];
-                    if (!sync.inbound_val(peer, h, pair[1], pair[0].asUlong()))
-                        return false;
+                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong());
                 }
                 break;
             }
@@ -1243,7 +1240,6 @@ nothrow @nogc:
                 log.warning("unknown kind: ", kind_str);
                 break;
         }
-        return true;
     }
 
     // For bind: iterate the frame's "props" object (if present) and emit one
@@ -1333,11 +1329,12 @@ private:
     {
         _buf ~= '}';
         const(ubyte)[] frame = cast(const(ubyte)[])_buf[];
-        int r = queue == TxQueue.control && !bundled ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
-        if (r < 0)
+        immutable bool direct = queue == TxQueue.control && !bundled;
+        int r = direct ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
+        if (r < 0 && direct)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
-            // a drop here means the peer permanently misses this event.
+            // a drop here means the peer permanently misses this event; a refused bundle stays with its producer.
             const preview = _buf.length < 200 ? _buf.length : 200;
             log.warning("dropped frame to peer (", _buf.length, "B): ", cast(const(char)[])_buf[0 .. preview], _buf.length > 200 ? "..." : "");
         }

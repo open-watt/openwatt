@@ -24,8 +24,8 @@ authority renames it. Beacons, the `hello` frame and the neighbour table all car
 
 A discovery domain (`/sync/discover/udp`) beacons this node's peering identity from each local
 endpoint it binds, feeds received beacons into the neighbour table, and owns one dynamic sync server
-over the same endpoints. Domains are the opt-in: with no domain configured a segment carries no
-beacons and accepts no inbound sync.
+listening on the sync port at the same addresses and interfaces. Domains are the opt-in: with no
+domain configured a segment carries no beacons and accepts no inbound sync.
 
 A domain binds a list of local endpoints. `bind=` takes exact endpoints (AF_ETHERNET or IPv4; an
 omitted port takes the domain's `port=`, default 4826), `interface=` resolves to AF_ETHERNET and
@@ -88,10 +88,10 @@ are `dynamic` instances in the same collection, named after the remote node.
 The member dials. It is the end that can: a member behind NAT, or with no inbound surface at all,
 still joins its fleet, and the authority still decides who joins by answering rather than by
 calling. Every five seconds a member sweeps its neighbour table and, for each authority of its
-fleet it has no session to, opens a connected UDP endpoint from that authority's most preferable
-live link (bound to the address and station the beacon arrived on, toward the beacon's source
-address and port) and spawns a dynamic `/sync/peer` named `auth-<node-id>`. A member that reboots
-dials on the way up without waiting for a sweep.
+fleet it has no session to, opens an RDP session from that authority's most preferable live link
+(bound to the address and station the beacon arrived on, toward the beacon's source address on the
+sync port it announced) and spawns a dynamic `/sync/peer` named `auth-<node-id>`. A member that reboots dials on
+the way up without waiting for a sweep. A build without RDP is discovered but never dials.
 
 The `hello` exchanged on that session carries identity (node-id, role, cluster) and a fresh
 16-byte session nonce from each side. An authority that sees a member's hello pass its `claim`
@@ -172,7 +172,8 @@ The MITM window is the adoption instant itself, as with every pairing scheme.
 | member sweep | 5s |
 | dial deadline | 10s from open to hellos exchanged |
 | dial backoff | 30s doubling to 10m, per link |
-| service port | 4826, discovery and sync share the socket |
+| discovery port | 4826 (`port=`) |
+| sync port | 4827 (`sync-port=`), RDP sessions, announced while the listener serves |
 | IPv4 discovery group | `239.255.79.87` |
 
 ## Direction

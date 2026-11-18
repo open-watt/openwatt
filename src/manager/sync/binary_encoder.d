@@ -322,11 +322,11 @@ nothrow @nogc:
         send_frame(peer);
     }
 
-    override bool encode_log(SyncPeer peer, const(char)[] line)
+    override bool encode_log(SyncPeer peer, const(char)[] line, bool loss_notice = false)
     {
         begin_frame(Verb.log);
         _buf.put_str(line);
-        return send_frame(peer, TxQueue.log) >= 0;
+        return peer.discard_log(_buf.length, false, loss_notice) || send_frame(peer, TxQueue.log) >= 0;
     }
 
     // Outbound: time sync
@@ -560,14 +560,14 @@ nothrow @nogc:
 
     // Inbound
 
-    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         if (frame.length == 0)
-            return true;
+            return;
         if (frame[0] > Verb.max)
         {
             log.warning("unknown verb ", frame[0]);
-            return true;
+            return;
         }
         Verb verb = cast(Verb)frame[0];
         Reader r = Reader(frame[1 .. $]);
@@ -947,8 +947,7 @@ nothrow @nogc:
                         Variant v = r.variant();
                         if (r.fail)
                             break;
-                        if (!sync.inbound_val(peer, h, v, t_ms))
-                            return false;
+                        sync.inbound_val(peer, h, v, t_ms);
                     }
                 }
                 while (r.remaining && !r.fail);
@@ -1046,7 +1045,6 @@ nothrow @nogc:
 
         if (r.fail)
             log.warning("truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
-        return true;
     }
 
     // Per-peer per-tick property flush
@@ -1119,11 +1117,12 @@ private:
 
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control, bool bundled = false)
     {
-        int r = queue == TxQueue.control && !bundled ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
-        if (r < 0)
+        immutable bool direct = queue == TxQueue.control && !bundled;
+        int r = direct ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
+        if (r < 0 && direct)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
-            // a drop here means the peer permanently misses this event.
+            // a drop here means the peer permanently misses this event; a refused bundle stays with its producer.
             log.warning("dropped frame to peer (", _buf.length, "B): verb=", enum_key_name!Verb(cast(Verb)_buf[0]));
         }
         return r;
