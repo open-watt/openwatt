@@ -1137,6 +1137,14 @@ private:
             foreach (ref fd; mm.fields)
                 emit_field(b, ml, *mm, fd, comps[fd.component_index], mf);
 
+            // models 101-103 and 111-113 carry no DC energy register; with no model 160 the AC counter is the only pv counter
+            if (pv_input_count == 0 && ((ml.model_id >= 101 && ml.model_id <= 103) || (ml.model_id >= 111 && ml.model_id <= 113)))
+            {
+                foreach (ref fd; mm.fields)
+                    if (fd.component_index == 4 && fd.id == "import")
+                        emit_field(b, ml, *mm, fd, comps[2], mf);
+            }
+
             if (mm.repeat.stride > 0 && mm.repeat.fields.length > 0)
             {
                 const(char)[] repeat_prefix = mm.repeat.path_prefix;
