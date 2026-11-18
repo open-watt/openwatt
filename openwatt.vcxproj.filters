@@ -408,6 +408,9 @@
     <DCompile Include="src\main.d">
       <Filter>src</Filter>
     </DCompile>
+    <DCompile Include="src\urt_config.d">
+      <Filter>src</Filter>
+    </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>
     </DCompile>

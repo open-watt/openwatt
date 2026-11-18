@@ -211,6 +211,43 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-11 | #965 | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | ASH and CPC queue the producer's packet, not a 128/256-byte buffer per message, and warn and count a drop when a message cannot be allocated: +0 flash |
 | 2026-11-18 | #947 (d5dd6cca) | ldc 1.43.0 | 1,609,348 | 46,412 | 4,194,304 | matched release vs cd7edf82 (1,609,268 B); +80 B, RAM unchanged |
 
+| 2026-11-09 | #928 | ldc 1.43.0 | 1,608,692 | 46,412 | 4,194,304 | 80 B headroom; the page classes, their count included, come from src/urt_config.d: identical to the fixed two-class revision |
+
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,598,508 | 46,400 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT master 037bd3c |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,601,852 | 46,400 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT old #404 381473d |
+| 2026-11-17 | e060499 | ldc 1.43.0 | 1,598,460 | 46,404 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT old #404 rebased on 037bd3c, before trims |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,598,508 | 46,400 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT #404 trim, static selection (comparison; uncontrolled source order) |
+
+### RP2350, `make PLATFORM=rp2350 CONFIG=release TINY=1`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,550,564 | 45,624 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT master 037bd3c |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,553,876 | 45,624 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT old #404 381473d |
+| 2026-11-17 | e060499 | ldc 1.43.0 | 1,550,596 | 45,624 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT old #404 rebased on 037bd3c, before trims |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,550,548 | 45,636 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT #404 trim, loop selection (final; uncontrolled source order) |
+| 2026-11-17 | b7e8212 | ldc 1.43.0 | 1,550,548 | 45,636 | 4,194,304 | RP2350 pool comparison on OpenWatt 89ff4a6e; uRT #404 trim, static selection (comparison; uncontrolled source order) |
+
+### RP2350, controlled source-order pagepool measurements
+
+`CONFIG=release`, with `APP_SOURCES` and `URT_SOURCES` sorted in the measurement
+wrapper only. Earlier pool probes using commits b7e8212/e060499 had uncontrolled
+module order and are not valid paired comparisons. The rows below supersede
+those comparisons; production Makefiles are unchanged.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,598,548 | 46,424 | 4,194,304 | base404-tiny0; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,550,652 | 45,656 | 4,194,304 | base404-tiny1; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,598,548 | 46,424 | 4,194,304 | combined-loop-tiny0; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,550,652 | 45,656 | 4,194,304 | combined-loop-tiny1; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,550,652 | 45,656 | 4,194,304 | combined-static-tiny1; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,598,548 | 46,424 | 4,194,304 | item1-tiny0; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,550,652 | 45,656 | 4,194,304 | item1-tiny1; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,598,548 | 46,424 | 4,194,304 | item2-tiny0; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | fa7ea5f | ldc 1.43.0 | 1,550,652 | 45,656 | 4,194,304 | item2-tiny1; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | 59e8a04 | ldc 1.43.0 | 1,598,548 | 46,424 | 4,194,304 | master-tiny0; OpenWatt 89ff4a6e, sorted source order |
+| 2026-11-17 | 59e8a04 | ldc 1.43.0 | 1,550,604 | 45,656 | 4,194,304 | master-tiny1; OpenWatt 89ff4a6e, sorted source order |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

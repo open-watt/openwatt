@@ -453,7 +453,7 @@ private:
 }
 static assert(StackPacket.packet.offsetof == Page.sizeof);
 
-enum ubyte packet_headroom = 128;
+enum ubyte packet_headroom = 80;
 
 version (FramingDiagnostics) enum bool has_framing_diagnostics = true;
 else debug enum bool has_framing_diagnostics = true;
@@ -840,6 +840,13 @@ unittest
     ubyte[1500] mtu_bytes;
     StackPacket mtu;
     mtu.init!Ethernet(mtu_bytes[]);
+    static immutable ushort[2] class_payloads = [253, 1500];
+    foreach (ubyte category, payload; class_payloads)
+    {
+        Packet* p = alloc_packet!RawFrame(payload);
+        assert(p && page_category(p.page) == category, "a default packet of 253 or 1500 bytes fits its page class");
+        packet_free(p);
+    }
     Packet* framable = packet_mutable(&mtu.packet, 18, 18);
     assert(framable && framable.headroom >= 18 && page_category(framable.page) < page_pool_num_categories(), "a full-size lent frame is copied with the room it asks for into a pool page");
     packet_free(framable);
