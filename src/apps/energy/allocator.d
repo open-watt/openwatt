@@ -37,10 +37,29 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
 
     static struct Ranked { Policy p; float mv; }
     Array!Ranked queue;
+    Array!(Control*) driven;
     foreach (Policy p; Collection!Policy().values)
     {
         if (!p.running)
             continue;
+        Control* ctl = registry.lookup(p.target_appliance);
+        if (witness_unknown(p, ctl, now))
+        {
+            if (p.tier == PolicyTier.floor && ctl.command_policy == p.id && ctl.current_setpoint == ctl.current_setpoint)
+            {
+                driven ~= ctl;
+                record_decision(energy_device, p, "hold: state unknown", ctl.current_setpoint, now, null, ctl);
+                if (!p.witness_hold_warned)
+                {
+                    p.log.warning("holding command while state is unknown");
+                    p.witness_hold_warned = true;
+                }
+            }
+            else
+                record_decision(energy_device, p, "state unknown", float.nan, now, null, ctl);
+            continue;
+        }
+        p.witness_hold_warned = false;
         IslandBudget* b = planner.budget_for_policy(p, islands);
         PolicyAnalysis a = analyse_policy(p, registry, now, planner.slack_threshold, b, &graph);
         if (a.marginal_value > 0)
@@ -48,7 +67,6 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
     }
     queue.sort!((Ranked a, Ranked b) => a.mv > b.mv);
 
-    Array!(Control*) driven;
     Array!PathCommitment commitments;
     Array!SurplusPool surplus_pools;
     foreach (ref r; queue)
@@ -75,6 +93,33 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
         AllocationContext ctx;
         graph.build_control_path(p.target_appliance, ctx.path);
         refresh_available_headroom(ctx, commitments);
+        GoalKind goal = p.parsed_goal.kind;
+        bool owned = ctl.current_setpoint == ctl.current_setpoint;
+        float draw_watts = float.nan;
+        float surplus = float.nan;
+        if (p.tier == PolicyTier.opportunistic && goal != GoalKind.off)
+        {
+            surplus = surplus_remaining(surplus_pools, ctx.path.source_bus);
+            if (surplus != surplus)
+            {
+                bool hold = owned && appliance_draw_watts(graph, p.target_appliance, true) > 0;
+                if (hold)
+                    driven ~= ctl;
+                record_decision(energy_device, p, hold ? "hold: no export witness" : "no export witness",
+                                hold ? ctl.current_setpoint : float.nan, now, &ctx, ctl);
+                continue;
+            }
+            draw_watts = appliance_draw_watts(graph, p.target_appliance);
+        }
+        if (ctx.current_lost && goal != GoalKind.off)
+        {
+            if (owned)
+                driven ~= ctl;
+            record_decision(energy_device, p, owned ? "hold: link current unknown" : "link current unknown",
+                            ctl.current_setpoint, now, &ctx, ctl);
+            continue;
+        }
+
         final switch (p.parsed_goal.kind) with (GoalKind)
         {
             case none:
@@ -146,51 +191,56 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
 
                 // Present draw is already consuming surplus, so add it back before
                 // capping an opportunistic control to the remaining export.
-                float draw_watts = float.nan;
-                if (p.tier == PolicyTier.opportunistic)
+                if (p.tier == PolicyTier.opportunistic &&
+                    (ctl.unit == ControlUnit.A || ctl.unit == ControlUnit.W || ctl.unit == ControlUnit.boolean))
                 {
-                    draw_watts = appliance_draw_watts(graph, p.target_appliance);
-                    float surplus = surplus_remaining(surplus_pools, ctx.path.source_bus);
-                    if (surplus == surplus)
+                    float budget_watts = (draw_watts == draw_watts ? draw_watts : 0) + surplus;
+                    if (budget_watts <= 0)
                     {
-                        float budget_watts = (draw_watts == draw_watts ? draw_watts : 0) + surplus;
-                        if (ctl.unit == ControlUnit.A && ctx.path.voltage == ctx.path.voltage && ctx.path.voltage > 0)
+                        record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                        continue;
+                    }
+                    if (ctl.unit == ControlUnit.A)
+                    {
+                        if (!(ctx.path.voltage > 0))
                         {
-                            float cap_amps = budget_watts / ctx.path.voltage;
-                            float min_amps = ctl.min;
-                            if (cap_amps < (min_amps == min_amps ? min_amps : 0))
-                            {
-                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
-                                continue;
-                            }
-                            if (setpoint.normalise().value > cap_amps)
-                            {
-                                setpoint = Amps(cap_amps);
-                                reason = "drive (surplus-limited)";
-                            }
+                            record_decision(energy_device, p, "no voltage", float.nan, now, &ctx, ctl);
+                            continue;
                         }
-                        else if (ctl.unit == ControlUnit.W)
+                        float cap_amps = budget_watts / ctx.path.voltage;
+                        float min_amps = ctl.min;
+                        if (cap_amps < (min_amps == min_amps ? min_amps : 0))
                         {
-                            float min_watts = ctl.min;
-                            if (budget_watts < (min_watts == min_watts ? min_watts : 0))
-                            {
-                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
-                                continue;
-                            }
-                            if (setpoint.normalise().value > budget_watts)
-                            {
-                                setpoint = Watts(budget_watts);
-                                reason = "drive (surplus-limited)";
-                            }
+                            record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                            continue;
                         }
-                        else if (ctl.unit == ControlUnit.boolean)
+                        if (setpoint.normalise().value > cap_amps)
                         {
-                            float nameplate = ctl.nameplate_power;
-                            if (nameplate == nameplate && nameplate > budget_watts)
-                            {
-                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
-                                continue;
-                            }
+                            setpoint = Amps(cap_amps);
+                            reason = "drive (surplus-limited)";
+                        }
+                    }
+                    else if (ctl.unit == ControlUnit.W)
+                    {
+                        float min_watts = ctl.min;
+                        if (budget_watts < (min_watts == min_watts ? min_watts : 0))
+                        {
+                            record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                            continue;
+                        }
+                        if (setpoint.normalise().value > budget_watts)
+                        {
+                            setpoint = Watts(budget_watts);
+                            reason = "drive (surplus-limited)";
+                        }
+                    }
+                    else if (ctl.unit == ControlUnit.boolean)
+                    {
+                        float nameplate = ctl.nameplate_power;
+                        if (nameplate == nameplate && nameplate > budget_watts)
+                        {
+                            record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                            continue;
                         }
                     }
                 }
@@ -281,6 +331,9 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 driven ~= ctl;
                 break;
         }
+        registry.settle_dispatch(ctl);
+        if (goal != GoalKind.off)
+            ctl.command_policy = p.id;
     }
 
     MonoTime mt_release = getTime();
@@ -353,20 +406,27 @@ float bus_export_watts(Bus* bus)
     {
         if (p.role != PortRole.grid)
             continue;
-        if (!p.meter_data.has(MeterField.power))
+        if (!p.meter_data.has(MeterField.power) || p.meter_data.is_inferred(MeterField.power))
             return float.nan;
         return -p.meter_data.active[0].value;
     }
     return float.nan;
 }
 
-float appliance_draw_watts(ref TopologyGraph graph, Appliance target)
+float appliance_draw_watts(ref TopologyGraph graph, Appliance target, bool witness_only = false)
 {
     if (target is null)
         return float.nan;
     foreach (p; graph.ports[])
-        if (p.owner is target && p.bus !is null && p.meter_data.has(MeterField.power))
-            return absf(p.meter_data.active[0].value);
+    {
+        if (p.owner !is target || p.bus is null || !p.meter_data.has(MeterField.power))
+            continue;
+        float power = p.meter_data.active[0].value;
+        if (!witness_only)
+            return absf(power);
+        if (!p.meter_data.is_inferred(MeterField.power) && power > 0)
+            return power;
+    }
     return float.nan;
 }
 
@@ -397,6 +457,7 @@ struct AllocationContext
     float available_headroom_watts = float.nan;
     float committed_amps = float.nan;
     float committed_watts = float.nan;
+    bool current_lost;
 }
 
 const(char)[] no_control_reason(Appliance target)
@@ -459,12 +520,22 @@ void refresh_available_headroom(ref AllocationContext ctx, ref Array!PathCommitm
     ctx.available_headroom_watts = float.nan;
     ctx.committed_amps = float.nan;
     ctx.committed_watts = float.nan;
+    ctx.current_lost = false;
 
     float min_headroom = float.infinity;
     bool any;
     foreach (link; ctx.path.links[])
     {
-        float headroom = link_headroom_after_commitments(link, commitments);
+        float current;
+        float headroom = link_headroom_amps(link, current);
+        if (headroom != headroom)
+        {
+            if (!ctx.current_lost && current != current && link && link.capacity_amps != 0 &&
+                link_has_current_meter(link))
+                ctx.current_lost = true;
+            continue;
+        }
+        headroom -= committed_amps_for(link, commitments);
         if (headroom != headroom)
             continue;
         if (headroom < min_headroom)
@@ -478,14 +549,6 @@ void refresh_available_headroom(ref AllocationContext ctx, ref Array!PathCommitm
     ctx.available_headroom_amps = min_headroom;
     if (ctx.path.voltage == ctx.path.voltage && ctx.path.voltage > 0)
         ctx.available_headroom_watts = min_headroom * ctx.path.voltage;
-}
-
-float link_headroom_after_commitments(Link* link, ref Array!PathCommitment commitments)
-{
-    float headroom = link_headroom_amps(link);
-    if (headroom != headroom)
-        return float.nan;
-    return headroom - committed_amps_for(link, commitments);
 }
 
 float committed_amps_for(Link* link, ref Array!PathCommitment commitments)
@@ -577,7 +640,8 @@ float drive_control(ref Control ctl, VarQuantity value, SysTime now, MonoTime mt
     if (ctl.enable_e !is null)
         ctl.enable_e.value(true, now);
     float commanded = 1;
-    if (ctl.setpoint_e !is null && value.value == value.value)
+    ctl.setpoint_written = ctl.setpoint_e !is null && value.value == value.value;
+    if (ctl.setpoint_written)
     {
         ctl.setpoint_e.value(value, now);
         commanded = cast(float)value.normalise().value;
@@ -605,9 +669,11 @@ bool setpoint_already(ref const Control ctl, VarQuantity target)
 
 float release_control(ref Control ctl, SysTime now, MonoTime mt)
 {
+    ctl.setpoint_written = false;
     if (ctl.setpoint_e is null && ctl.enable_e is null)
     {
         ctl.current_setpoint = float.nan;
+        ctl.command_policy = CID.init;
         return float.nan;
     }
     if (setpoint_change_block_reason(ctl, 0, mt).length != 0)
@@ -652,11 +718,13 @@ float release_control(ref Control ctl, SysTime now, MonoTime mt)
         if (have_target && !setpoint_already(ctl, target))
         {
             ctl.setpoint_e.value(target, now);
+            ctl.setpoint_written = true;
             wrote = true;
         }
     }
     // This tracks allocator ownership, not the actuator's observed value.
     ctl.current_setpoint = float.nan;
+    ctl.command_policy = CID.init;
     // An unsatisfiable off policy re-enters the allocator; only a real change
     // may restart dwell.
     if (wrote)
@@ -696,4 +764,238 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
         put(DecisionField.path_voltage, ctx.path.voltage);
         put(DecisionField.limiting_link, (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").make_string());
     }
+}
+
+
+unittest
+{
+    import urt.log : LogMessage, register_log_sink, unregister_log_sink;
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : Percent;
+    import apps.energy.meter : Provenance;
+
+    auto appliances = Collection!Appliance();
+    Appliance target = appliances.alloc("allocator-test-load");
+    appliances.add(target);
+    scope(exit)
+    {
+        appliances.remove(target);
+        free(target);
+    }
+
+    auto policies = Collection!Policy();
+    Policy policy = policies.alloc("allocator-test-policy");
+    policies.add(policy);
+    scope(exit)
+    {
+        policy.destroy();
+        policies.update_all();
+    }
+    assert(policy.target(target.name[]) is null);
+
+    DeviceTable devices;
+    auto builder = devices.create("allocator-test");
+    Device device = builder.device;
+    Element* enable = builder.element("enable", register_value_format!bool());
+    Element* setpoint = builder.element("setpoint", register_value_format!Watts());
+    Element* max_e = builder.element("max", register_value_format!Watts());
+    Element* unit = builder.element("unit", register_value_format!string());
+    alias Soc = Quantity!(float, Percent);
+    Element* soc = builder.element("soc", register_value_format!Soc());
+    Component meter = builder.component("breaker-meter", "EnergyMeter");
+    builder.element(meter, "current1", register_value_format!Amps());
+    enable.value(false);
+    max_e.value(Watts(1000));
+    unit.value("W");
+    soc.sampling_mode = SamplingMode.poll;
+    builder.commit();
+
+    ControlRegistry registry = alloc!ControlRegistry();
+    scope(exit) free(registry);
+    Control setup;
+    setup.enable_e = enable;
+    setup.setpoint_e = setpoint;
+    setup.max_e = max_e;
+    setup.unit_e = unit;
+    setup.state_e = soc;
+    registry.by_owner.replace(target.id, setup.move);
+    Control* ctl = registry.lookup(target);
+
+    TopologyGraph graph;
+    scope(exit) graph.clear();
+    Bus* source = graph.ensure_bus("source");
+    source.contains_grid = true;
+    Bus* load = graph.ensure_bus("load");
+    Port* grid = graph.add_port(null, source, PortRole.grid, FlowDomain.bidirectional, null, 0);
+    Port* load_port = graph.add_port(target, load, PortRole.outlet, FlowDomain.consume, null, 0);
+    Port* breaker_port = graph.add_port(null, load, PortRole.connection, FlowDomain.bidirectional, null, 0);
+    Link* breaker = graph.add_link(null, source, load, null, breaker_port, 20);
+    Islands islands;
+    Planner planner;
+
+    static void count_warning(void* context, scope ref const LogMessage message)
+    {
+        if (message.message == "holding command while state is unknown")
+            ++*cast(uint*)context;
+    }
+
+    uint warnings;
+    auto sink = register_log_sink(&count_warning, &warnings);
+    scope(exit) unregister_log_sink(sink);
+
+    void tick(const(char)[] expected)
+    {
+        policies.update_all();
+        assert(policy.running);
+        run_allocator(device, registry, planner, islands, graph);
+        assert(policy.decision[DecisionField.reason].element.text_value() == expected);
+    }
+
+    assert(policy.goal("soc(80)") is null);
+    policy.tier = PolicyTier.floor;
+    tick("state unknown");
+    assert(!enable.value.asBool && warnings == 0);
+    assert(analyse_policy(policy, registry, getSysTime(), Duration.zero).marginal_value == 0);
+
+    ctl.enable_e = null;
+    assert(!setpoint.has_value);
+    assert(policy.goal("on") is null);
+    tick("on");
+    assert(setpoint.has_value && ctl.current_setpoint == 1000);
+    ctl.enable_e = enable;
+
+    assert(policy.goal("soc(80)") is null);
+    soc.value(Soc(20));
+    publish_policy(device, policy, registry);
+    assert(policy.published[PolicyField.current_value].element.has_value);
+    tick("drive");
+    assert(enable.value.asBool && ctl.current_setpoint == 1000);
+
+    SysTime command_time = setpoint.record_update;
+    soc.last_update = getSysTime() - dur!"seconds"(181);
+    publish_policy(device, policy, registry);
+    assert(!policy.published[PolicyField.current_value].element.has_value);
+    tick("hold: state unknown");
+    tick("hold: state unknown");
+    assert(warnings == 1 && setpoint.record_update == command_time && ctl.current_setpoint == 1000);
+
+    soc.value(Soc(21));
+    tick("drive");
+    soc.last_update = getSysTime() - dur!"seconds"(181);
+    tick("hold: state unknown");
+    assert(warnings == 2);
+    policy.tier = PolicyTier.important;
+    tick("state unknown");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    assert(ctl.command_policy == CID.init);
+
+    policy.tier = PolicyTier.floor;
+    Policy other = policies.alloc("allocator-test-other");
+    policies.add(other);
+    assert(other.target(target.name[]) is null);
+    other.tier = PolicyTier.important;
+    assert(other.goal("on") is null);
+    tick("state unknown");
+    assert(ctl.current_setpoint == 1000 && ctl.command_policy == other.id);
+    assert(other.goal("off") is null);
+    tick("state unknown");
+    assert(!enable.value.asBool && ctl.command_policy == CID.init);
+    other.destroy();
+    policies.update_all();
+    policy.tier = PolicyTier.important;
+
+    ctl.state_e = null;
+    tick("drive");
+    assert(ctl.current_setpoint == 1000);
+    ctl.state_e = soc;
+    soc.value(Soc(20));
+    policy.tier = PolicyTier.opportunistic;
+    grid.meter_data.write_value(MeterField.power, 0, -1000);
+    grid.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
+    breaker_port.meter = meter;
+    load_port.meter_data.write_value(MeterField.power, 0, 400);
+    load_port.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    command_time = setpoint.record_update;
+    tick("hold: no export witness");
+    assert(setpoint.record_update == command_time && ctl.current_setpoint == 1000);
+
+    load_port.meter_data.write_value(MeterField.power, 0, 0);
+    tick("no export witness");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    load_port.meter_data.reset_to_missing();
+    enable.value(true);
+    ctl.current_setpoint = 1000;
+    tick("no export witness");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    enable.value(true);
+    ctl.current_setpoint = 1000;
+    load_port.meter_data.write_value(MeterField.power, 0, 400);
+    load_port.meter_data.mark(MeterField.power, 0, Provenance.inferred_sum);
+    tick("no export witness");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    enable.value(true);
+    ctl.current_setpoint = 1000;
+    load_port.meter_data.write_value(MeterField.power, 0, -400);
+    load_port.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    tick("no export witness");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    load_port.meter_data.reset_to_missing();
+    breaker_port.meter = null;
+
+    assert(policy.goal("on") is null);
+    tick("no export witness");
+    assert(!enable.value.asBool);
+    assert(policy.goal("(false)") is null);
+    tick("no export witness");
+    assert(!enable.value.asBool);
+    assert(policy.goal("soc(80)") is null);
+    ctl.setpoint_e = null;
+    tick("no export witness");
+    assert(!enable.value.asBool);
+    ctl.setpoint_e = setpoint;
+
+    grid.meter_data.write_value(MeterField.power, 0, 0);
+    grid.meter_data.mark(MeterField.power, 0, Provenance.measured);
+    SysTime enable_time = enable.record_update;
+    tick("no surplus");
+    assert(!enable.value.asBool && enable.record_update == enable_time);
+
+    unit.value("A");
+    max_e.value(Amps(16));
+    grid.meter_data.write_value(MeterField.power, 0, -1000);
+    tick("no voltage");
+    assert(!enable.value.asBool);
+
+    unit.value("W");
+    max_e.value(Watts(1000));
+    policy.tier = PolicyTier.important;
+    tick("drive");
+    assert(ctl.current_setpoint == 1000 && breaker.capacity_amps == 20);
+    breaker_port.meter = meter;
+    max_e.value(Watts(2000));
+    command_time = setpoint.record_update;
+    tick("hold: link current unknown");
+    assert(ctl.current_setpoint == 1000 && setpoint.record_update == command_time);
+
+    enable.sampling_mode = SamplingMode.poll;
+    enable.last_update = getSysTime() - dur!"seconds"(181);
+    assert(policy.goal("off") is null);
+    tick("off");
+    assert(!enable.value.asBool);
+    assert(policy.goal("soc(80)") is null);
+    tick("link current unknown");
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+
+    enable.value(true);
+    ctl.current_setpoint = 1000;
+    soc.value(Soc(90));
+    policies.update_all();
+    run_allocator(device, registry, planner, islands, graph);
+    assert(!enable.value.asBool && ctl.current_setpoint != ctl.current_setpoint);
+    publish_policy(device, policy, registry);
+    assert(policy.published[PolicyField.satisfied].element.value.asBool);
+    soc.last_update = getSysTime() - dur!"seconds"(181);
+    publish_policy(device, policy, registry);
+    assert(!policy.published[PolicyField.satisfied].element.value.asBool);
+    assert(!policy.published[PolicyField.current_value].element.has_value);
 }

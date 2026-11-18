@@ -129,7 +129,7 @@ IslandBudget compute_island_budget(Island* island, ControlRegistry registry, Sys
                     continue;
                 seen ~= owner;
                 if (Component device = owner.device_ref)
-                    sum_batteries(device, b);
+                    sum_batteries(device, b, now);
             }
         }
     }
@@ -168,7 +168,7 @@ PolicyAnalysis analyse_policy(Policy p, ControlRegistry registry, SysTime now, D
 
     Control* ctl = registry !is null ? registry.lookup(p.target_appliance) : null;
 
-    if (satisfied(p, ctl))
+    if (witness_unknown(p, ctl, now) || satisfied(p, ctl))
     {
         a.marginal_value = 0;
         return a;
@@ -234,19 +234,20 @@ PolicyAnalysis analyse_policy(Policy p, ControlRegistry registry, SysTime now, D
 
 private:
 
-void sum_batteries(Component c, ref IslandBudget b)
+void sum_batteries(Component c, ref IslandBudget b, SysTime now)
 {
     if (c.template_[] == "Battery")
     {
         float cap = battery_capacity_kwh(c);
         if (cap < 0)
             cap = float.nan;
-        float soc = read_in_unit(c.find_element("soc"), Percent);
+        Element* soc_e = c.find_element("soc");
+        float soc = reading_present(soc_e, now) ? read_in_unit(soc_e, Percent) : float.nan;
         b.battery_capacity_kwh += cap;
         b.battery_available_kwh += cap * soc * 0.01f;
     }
     foreach (sub; c.components[])
-        sum_batteries(sub, b);
+        sum_batteries(sub, b, now);
 }
 
 Island* find_policy_island(Policy p, Island* candidate)
@@ -581,4 +582,25 @@ unittest
     graph.battery_stores[0].reading.soc = 0;
     budget = compute_island_budget(&island, null, now, Duration.zero, 1, &graph);
     assert(budget.battery_available_kwh == 0);
+
+    import manager.device : DeviceTable;
+    DeviceTable devices;
+    auto builder = devices.create("planner-freshness");
+    Component battery = builder.component("battery", "Battery");
+    alias Capacity = Quantity!(float, AmpereHour);
+    alias Voltage = Quantity!(float, ScaledUnit(Volt));
+    Element* capacity = builder.element(battery, "full_capacity", register_value_format!Capacity());
+    Component meter = builder.component(battery, "meter", "EnergyMeter");
+    builder.element(meter, "voltage", register_value_format!Voltage()).value(Voltage(100));
+    Element* stored_soc = builder.element(battery, "soc", register_value_format!SOC());
+    capacity.sampling_mode = SamplingMode.poll;
+    stored_soc.sampling_mode = SamplingMode.poll;
+    capacity.value(Capacity(100), now);
+    stored_soc.value(SOC(50), now);
+    IslandBudget fresh;
+    sum_batteries(battery, fresh, now);
+    assert(fresh.battery_capacity_kwh == 10 && fresh.battery_available_kwh == 5);
+    IslandBudget expired;
+    sum_batteries(battery, expired, now + dur!"seconds"(181));
+    assert(expired.battery_capacity_kwh == 10 && expired.battery_available_kwh != expired.battery_available_kwh);
 }
