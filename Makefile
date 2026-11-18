@@ -638,6 +638,7 @@ ifdef ESP_PROJECT_DIR
         ESP_FLASH_SIZE := $(BOARD_FLASH_SIZE)
         ESP_PSRAM_SIZE := $(BOARD_PSRAM_SIZE)
     endif
+    ESP_SDKCONFIG_DEFAULTS := $(ESP_SDKCONFIG_DEFAULTS);$(abspath platforms/esp32-common/sdkconfig.ble-$(USE_BLE).defaults)
     ifeq ($(COREDUMP),1)
         ESP_COREDUMP_SDKCONFIG := $(abspath $(ESP_PROJECT_DIR)/sdkconfig.coredump.defaults)
         ifeq ($(wildcard $(ESP_COREDUMP_SDKCONFIG)),)
