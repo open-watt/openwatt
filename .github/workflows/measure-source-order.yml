@@ -40,10 +40,11 @@ jobs:
           SH
           chmod +x tools-order/find
           export PATH="$PWD/tools-order:$PATH"
-          printf 'include Makefile
-override APP_SOURCES := $(sort $(APP_SOURCES))
-override DFLAGS += -L--Map=$(abspath measurement/image.map)
-' > measurement.mk
+          cat > measurement.mk <<'MAKE'
+          include Makefile
+          override APP_SOURCES := $(sort $(APP_SOURCES))
+          override DFLAGS += -L--Map=$(abspath measurement/image.map)
+          MAKE
           for order in forward reverse; do
             export FIND_ORDER="$order"
             mkdir -p "measurement/$order"
