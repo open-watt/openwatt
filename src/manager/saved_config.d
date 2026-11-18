@@ -19,7 +19,7 @@ enum saved_config_file = "conf/config.conf";
 
 void export_all(ref MutableString!0 buf)
 {
-    import manager.system : hostname, hostname_explicit;
+    import manager.system : hostname, hostname_explicit, timezone_override;
 
     if (hostname_explicit)
     {
@@ -28,6 +28,8 @@ void export_all(ref MutableString!0 buf)
         append_config_value(buf, value);
         buf.append('\n');
     }
+    if (timezone_override)
+        buf.append("/system/set-timezone offset=", timezone_override.value, '\n');
 
     static immutable string[3] phase_names = [ "Create", "Configure", "Enable" ];
     foreach (phase; 0 .. 3)

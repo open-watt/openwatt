@@ -52,13 +52,16 @@ any of them wakes the rule.
 | --- | --- | --- |
 | element | `@device.component.element` | the element's value actually changes; `$value` is the new value |
 | every | `every:<duration>[?repeat=false]` | each interval, or once |
-| at | `at:<hh:mm>[?days=mon,wed,fri]` | that time of day, optionally on the named weekdays |
-| when | `when:<datetime>` | an absolute instant, once |
+| at | `at:<hh:mm>[?days=mon,wed,fri]` | that local time of day, optionally on the named local weekdays |
+| when | `when:<datetime>` | that instant, once; local time unless it carries `Z` or `+hh:mm` |
 | object | `object:<name>?state=online\|offline\|destroyed` | an `ActiveObject` makes that transition; `online` also fires immediately if it is already running |
 
 `schedule=<duration>`, `at=<hh:mm>` and `when=<datetime>` are write-only shorthands for the three
 time URIs and share one slot with `on=`; a rule mixing time and events writes everything through
 `on=`. Finer detail, `?days=` and `?repeat=false`, lives in the URI and has no sugar.
+
+Local time follows `/system/timezone`. A local time that a DST jump skips fires at the first
+moment after the gap; a local time that falling back repeats fires once.
 
 **Arming has three outcomes.** A malformed URI is rejected at the CLI by the provider's
 `validate`. A URI naming an element that does not exist yet parks the rule in `Starting` with a
