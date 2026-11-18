@@ -2,6 +2,7 @@ module apps.automation.automation;
 
 import urt.array;
 import urt.lifetime;
+import urt.map;
 import urt.log;
 import urt.mem;
 import urt.mem.temp;
@@ -319,7 +320,7 @@ protected:
         if (_condition_expr && (_edge != Edge.level || _hold != Duration()))
         {
             // seed the tracker so an already-true condition doesn't read as an edge on arm
-            _last_condition = condition_holds();
+            _last_condition = condition_holds(Variant());
             // a level for= qualifies from state, so "open for 5m" spans a restart;
             // rising/falling qualify only from an observed transition
             if (_hold != Duration() && _edge == Edge.level && _last_condition)
@@ -458,7 +459,7 @@ private:
             // evaluated; commit_run stamps the lockout / spends the token only on a real run
             if (!shaping_available(when))
                 return;
-            if (_condition_expr && !condition_holds())
+            if (_condition_expr && !condition_holds(ev.value))
                 return;
             commit_run(when, ev);
             return;
@@ -466,7 +467,7 @@ private:
 
         // edge/for must observe the condition on every settled trigger or transitions are
         // missed; here shaping guards only the run itself
-        bool cond = _condition_expr ? condition_holds() : true;
+        bool cond = _condition_expr ? condition_holds(ev.value) : true;
         bool was = _last_condition;
         _last_condition = cond;
         bool qualifying = _edge == Edge.falling ? !cond : cond;
@@ -559,7 +560,7 @@ private:
         _hold_armed = false;
 
         // final authoritative check: catches a silent drop since the last observed trigger
-        bool cond = _condition_expr ? condition_holds() : true;
+        bool cond = _condition_expr ? condition_holds(_hold_value) : true;
         _last_condition = cond;
         bool qualifying = _edge == Edge.falling ? !cond : cond;
         if (qualifying)
@@ -580,12 +581,14 @@ private:
     void reset_condition_state()
     {
         cancel_hold();
-        _last_condition = _condition_expr ? condition_holds() : true;
+        _last_condition = _condition_expr ? condition_holds(Variant()) : true;
     }
 
-    bool condition_holds()
+    bool condition_holds(ref const Variant value)
     {
-        EvalContext ctx = { null, null, null };
+        Map!(String, Variant) locals;
+        locals[StringLit!"value"] = value;
+        EvalContext ctx = { null, &locals, null };
         Variant v = _condition_expr.evaluate(ctx);
         return is_truthy(v);
     }
