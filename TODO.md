@@ -26,9 +26,6 @@ left in place they are dead weight whose reason is invisible in the code.
   a base reference (every collection free) under-reports it to `MemoryThreats` accounting on targets
   whose allocator does not report usable size (Windows, Linux, ESP); the accounted total drifts up.
   Bare-metal heaps use `_memsize` and are exact. Needs the dynamic size at free.
-- `urt.mem.profile.record` call-site names are garbled on Windows DMD debug builds (file names
-  overwrite each other and every site resolves to one unrelated function), which makes
-  `/system/alloc/leaks` unusable for attribution there.
 
 - Validate boot-guard OTA handoff on ESP32 hardware with NVS write/commit failures
   and power loss before/after image acceptance and rollback slot selection. Also
