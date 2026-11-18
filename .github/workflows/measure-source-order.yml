@@ -1,0 +1,72 @@
+name: Measure source order
+on:
+  push:
+    branches: [codex/measure-source-order-20261118]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+      - uses: ./.github/actions/apt-install
+        with:
+          key: arm-none-eabi
+          packages: gcc-arm-none-eabi picolibc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Two clean builds with reversed find output
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C third_party/urt fetch origin codex/deterministic-source-order
+          git -C third_party/urt checkout --detach FETCH_HEAD
+          mkdir -p measurement tools-order
+          git rev-parse HEAD > measurement/openwatt-head.txt
+          git -C third_party/urt rev-parse HEAD > measurement/urt-head.txt
+          ldc2 --version > measurement/compiler.txt
+          cat > tools-order/find <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          case "$*" in
+            *third_party/urt/src*)
+              if [ "$FIND_ORDER" = reverse ]; then /usr/bin/find "$@" | LC_ALL=C sort -r;
+              else /usr/bin/find "$@" | LC_ALL=C sort; fi ;;
+            *) /usr/bin/find "$@" ;;
+          esac
+          SH
+          chmod +x tools-order/find
+          export PATH="$PWD/tools-order:$PATH"
+          printf 'include Makefile
+override APP_SOURCES := $(sort $(APP_SOURCES))
+override DFLAGS += -L--Map=$(abspath measurement/image.map)
+' > measurement.mk
+          for order in forward reverse; do
+            export FIND_ORDER="$order"
+            mkdir -p "measurement/$order"
+            find third_party/urt/src -name '*.d' > "measurement/$order/raw-find.txt"
+            make -f measurement.mk clean PLATFORM=rp2350 CONFIG=release TINY=1
+            make -f measurement.mk -j2 PLATFORM=rp2350 CONFIG=release TINY=1 2>&1 | tee "measurement/$order/build.log"
+            cp obj/rp2350_release/sources.rsp "measurement/$order/"
+            cp obj/rp2350_release/build.flags "measurement/$order/"
+            cp bin/rp2350_release/fw.bin "measurement/$order/"
+            cp measurement/image.map "measurement/$order/"
+            arm-none-eabi-size -B bin/rp2350_release/openwatt > "measurement/$order/size.txt"
+            sha256sum bin/rp2350_release/fw.bin | tee "measurement/$order/sha256.txt"
+          done
+          if cmp -s measurement/forward/raw-find.txt measurement/reverse/raw-find.txt; then
+            echo 'find order did not change'; exit 1
+          fi
+          cmp measurement/forward/sources.rsp measurement/reverse/sources.rsp
+          cmp measurement/forward/build.flags measurement/reverse/build.flags
+          cmp measurement/forward/fw.bin measurement/reverse/fw.bin
+          wc -c measurement/forward/fw.bin
+          cat measurement/forward/size.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-order-proof
+          path: measurement/
