@@ -64,6 +64,9 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-18 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | matched #947 master baseline |
 | 2026-11-18 | 0142be42 | ldc 1.43.0 | 3,890,832 | 153,592 | - | #947 before cleanup; +2,868 B vs cd7edf82 |
 | 2026-11-18 | #947 | ldc 1.43.0 | 3,888,924 | 153,592 | - | shared transmit body and style cleanup; +960 B vs cd7edf82, RAM unchanged |
+| 2026-11-15 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | master, matched control for #946 |
+| 2026-11-15 | ad404872 | ldc 1.43.0 | 3,889,096 | 153,592 | - | comparison only: old #946 1c1d77e8 rebased onto cd7edf82; +1,132 B |
+| 2026-11-15 | #946 | ldc 1.43.0 | 3,888,344 | 153,592 | - | validated OWS prefix, shared warning and bucket-array ownership transfer; +380 B, static RAM unchanged |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
