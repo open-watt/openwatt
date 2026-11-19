@@ -338,16 +338,17 @@ endif
 
 FLAGSTAMP = $(OBJDIR)/build.flags
 
-# Host-side image footprint report, run straight from source by rdmd.
+# Host-side image footprint report, shared by all target configurations.
 # The project ldc2.conf drops the default libraries, so the LDC path restores them.
 ifeq ($(COMPILER),ldc)
     LDC_BIN := $(dir $(if $(findstring /,$(DC)),$(DC),$(shell p=$$(command -v $(DC)); cygpath -m "$$p" 2>/dev/null || echo "$$p")))
-    BINSTATS := rdmd --compiler=$(LDC_BIN)ldmd2 -defaultlib=phobos2-ldc,druntime-ldc -L-L$(LDC_BIN)../lib tools/binstats.d
+    BINSTATS_DC := $(LDC_BIN)ldmd2 -defaultlib=phobos2-ldc,druntime-ldc -L-L$(LDC_BIN)../lib
 else ifeq ($(COMPILER),gdc)
-    BINSTATS := rdmd --compiler=gdmd tools/binstats.d
+    BINSTATS_DC := gdmd
 else
-    BINSTATS := rdmd --compiler=$(DC) tools/binstats.d
+    BINSTATS_DC := $(DC)
 endif
+BINSTATS := obj/host/binstats$(if $(filter MINGW% MSYS% CYGWIN%,$(shell uname -s)),.exe)
 BINSTATS_LEDGER = $(if $(filter release,$(CONFIG)),--ledger "$$("$(DC)" --version 2>/dev/null | head -1)" --commit "$$(git rev-parse --short HEAD 2>/dev/null || echo -)" --date "$$(date +%F)")
 BINSTATS_IMAGE := $(if $(filter bl808,$(PLATFORM)),m0fw.bin,$(if $(filter bl808_d0,$(PLATFORM)),d0fw.bin,$(if $(filter bl618 bk7231n bk7231t rp2350 stm32%,$(PLATFORM)),fw.bin)))
 
@@ -366,6 +367,10 @@ endif
 
 .PHONY: build
 build: $(TARGET) $(EXTRA_ARTEFACTS)
+
+$(BINSTATS): tools/binstats.d
+	@mkdir -p $(dir $@)
+	$(BINSTATS_DC) -of$@ -od$(dir $@) $<
 
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
 
@@ -442,7 +447,7 @@ ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo "To build flashable firmware:  make esp-idf-build PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD)) CONFIG=$(CONFIG)"
 	@echo "To flash:                     make esp-flash PLATFORM=$(PLATFORM)$(if $(BOARD), BOARD=$(BOARD))"
 else
-	-@$(BINSTATS) $(TARGET) $(if $(BINSTATS_IMAGE),--image $(TARGETDIR)/$(BINSTATS_IMAGE)) $(BINSTATS_LEDGER)
+	-@"$(MAKE)" --no-print-directory $(BINSTATS) && $(BINSTATS) $(TARGET) $(if $(BINSTATS_IMAGE),--image $(TARGETDIR)/$(BINSTATS_IMAGE)) $(BINSTATS_LEDGER)
 endif
 	@printf '%s' '$(BUILD_FLAGS)' > $(FLAGSTAMP)
 ifeq ($(ROUTEROS_BUILD),1)
@@ -705,7 +710,7 @@ endif
 	cp "$(ESP_BUILD_DIR)/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
 	cp "$(ESP_BUILD_DIR)/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
 	cp -f "$(ESP_BUILD_DIR)/ota_data_initial.bin" "$(TARGETDIR)/ota_data_initial.bin" 2>/dev/null || true
-	-@$(BINSTATS) "$(ESP_BUILD_DIR)/openwatt.elf" --image "$(TARGETDIR)/openwatt.bin" --partition-table "$(TARGETDIR)/partition-table.bin" $(BINSTATS_LEDGER)
+	-@"$(MAKE)" --no-print-directory $(BINSTATS) && $(BINSTATS) "$(ESP_BUILD_DIR)/openwatt.elf" --image "$(TARGETDIR)/openwatt.bin" --partition-table "$(TARGETDIR)/partition-table.bin" $(BINSTATS_LEDGER)
 	@echo ""
 	@echo "=== Firmware ready: $(TARGETDIR)/ ==="
 	@echo "  openwatt.bin"
