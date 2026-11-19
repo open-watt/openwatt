@@ -560,14 +560,14 @@ nothrow @nogc:
 
     // Inbound
 
-    override bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
+    override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
     {
         if (frame.length == 0)
-            return true;
+            return;
         if (frame[0] > Verb.max)
         {
             log.warning("unknown verb ", frame[0]);
-            return true;
+            return;
         }
         Verb verb = cast(Verb)frame[0];
         Reader r = Reader(frame[1 .. $]);
@@ -947,8 +947,7 @@ nothrow @nogc:
                         Variant v = r.variant();
                         if (r.fail)
                             break;
-                        if (!sync.inbound_val(peer, h, v, t_ms))
-                            return false;
+                        sync.inbound_val(peer, h, v, t_ms);
                     }
                 }
                 while (r.remaining && !r.fail);
@@ -1046,7 +1045,6 @@ nothrow @nogc:
 
         if (r.fail)
             log.warning("truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
-        return true;
     }
 
     // Per-peer per-tick property flush
