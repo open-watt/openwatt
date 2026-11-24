@@ -50,6 +50,7 @@ ulong node_id()
 {
     import urt.conv : format_uint, parse_uint;
     import urt.file : load_file, save_file;
+    import urt.io : flush, writeln_err, WriteTarget;
 
     if (_node_id != 0)
         return _node_id;
@@ -66,8 +67,9 @@ ulong node_id()
 
     version (Embedded)
     {
-        log_warning("system", "no hardware device id on this platform; peering identity unavailable");
-        return 0;
+        writeln_err("no hardware device id on this platform; cannot start");
+        flush!(WriteTarget.stderr)();
+        abort();
     }
     else
     {
@@ -85,6 +87,12 @@ ulong node_id()
             return _node_id;
 
         _node_id = generate_node_id();
+        if (!_node_id)
+        {
+            writeln_err("secure node identity unavailable; cannot start");
+            flush!(WriteTarget.stderr)();
+            abort();
+        }
 
         char[17] buf = void;
         format_uint(_node_id, buf[0 .. 16], 16, 16, '0');
@@ -548,17 +556,14 @@ const(char)[] format_node_id()
 ulong generate_node_id()
 {
     import urt.crypto.random : crypto_random_bytes;
-    import urt.rand : Rand, rand, srand;
 
     ulong id;
     while (true)
     {
         if (crypto_random_bytes((cast(ubyte*)&id)[0 .. id.sizeof]).failed)
         {
-            // no system RNG on this build; PCG over the clocks is good enough for a one-time id
-            Rand rng;
-            srand(getSysTime().ticks, getTime().ticks, rng);
-            id = ulong(rand(rng)) << 32 | rand(rng);
+            log_warning("system", "secure random source unavailable; cannot create node id");
+            return 0;
         }
         if (id != 0)
             return id;
@@ -624,4 +629,26 @@ auto format_bytes(ulong bytes) nothrow @nogc
         return tconcat(bytes / (1024 * 1024), " MB");
     else
         return tconcat(bytes / (1024 * 1024 * 1024), " GB");
+}
+
+
+unittest
+{
+    import urt.crypto.random : crypto_random_override;
+    import urt.result : InternalResult, Result;
+
+    auto previous = crypto_random_override;
+    scope(exit) crypto_random_override = previous;
+    crypto_random_override = (ubyte[] dst) nothrow @nogc
+    {
+        return InternalResult.failed;
+    };
+    assert(generate_node_id() == 0);
+
+    crypto_random_override = (ubyte[] dst) nothrow @nogc
+    {
+        dst[] = 0xA5;
+        return Result.success;
+    };
+    assert(generate_node_id() == 0xA5A5A5A5A5A5A5A5UL);
 }

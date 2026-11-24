@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-25 | #987 8cf6bc47 | ldc 1.43.0 | 3,875,356 | 153,480 | - | matched identity-disposition control; urt 9a143df, BUILD_ID=entropy-matched, prerequisite 364da718 |
+| 2026-11-25 | #987 identity-disposition source | ldc 1.43.0 | 3,875,368 | 153,480 | - | direct pre-sink stderr fatal output and boardless MT7621 build refusal; +12 B .pdata only vs 8cf6bc47, text/rdata/data/bss unchanged |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -248,6 +250,28 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-25 | #987 c41ff431 / urt 9a143df | M0 ldc 1.43.0 / D0 ldc 1.42.0 | 3,677,357 | 186,194 / 87,928 (M0/D0) | 4,190,208 | matched actual combined-bank control, BUILD_ID=entropy-matched; raw M0 2,657,416, packed D0 1,019,941 |
+| 2026-11-25 | #987 / urt 76b8145 | M0 ldc 1.43.0 / D0 ldc 1.42.0 | 3,677,518 | 186,194 / 87,928 (M0/D0) | 4,190,208 | boot-only D0 seed from M0, actual bank +161 B, per-core data/bss flat; reserves 128 B existing XRAM, ring capacity -64 B and MTU -16 B per direction |
+| 2026-11-25 | #987 unmerged wipe probe | M0 ldc 1.43.0 / D0 ldc 1.42.0 | 3,677,646 | 186,194 / 87,928 (M0/D0) | 4,190,208 | early IPC reset plus unrolled 32-byte volatile wipe, +289 B vs control; rejected for avoidable code growth |
+| 2026-11-25 | #987 / urt c7296ee | M0 ldc 1.43.0 / D0 ldc 1.42.0 | 3,677,518 | 186,194 / 87,928 (M0/D0) | 4,190,208 | final actual bank +161 B vs control, -128 B vs unrolled probe; reset before failure, compact scratch wipe; XRAM reservation unchanged |
+
+#### BL808 M0-only, `make PLATFORM=bl808 PROCESSOR=e907 D0=0 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #987 c41ff431 / urt 9a143df | ldc 1.43.0 | 2,657,416 | 186,194 | - | matched raw M0 control, fixed BUILD_ID=entropy-matched |
+| 2026-11-25 | #987 / urt 76b8145 | ldc 1.43.0 | 2,657,672 | 186,194 | - | raw image +256 B; text +132, rodata +64, data/bss flat; one TRNG init and checked boot seed copy/wipe |
+| 2026-11-25 | #987 unmerged wipe probe | ldc 1.43.0 | 2,657,800 | 186,194 | - | raw +384 B vs control; unrolled scratch wipe adds 140 B text vs 76b8145; data/bss flat |
+| 2026-11-25 | #987 / urt c7296ee | ldc 1.43.0 | 2,657,672 | 186,194 | - | raw +256 B vs control; text +192, rodata +64, data/bss flat; private wipe saves 80 B code vs probe, resets IPC before TRNG check |
+
+#### BL808 D0-only, `make PLATFORM=bl808_d0 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #987 c41ff431 / urt 9a143df | ldc 1.42.0 | 1,019,941 | 87,928 | - | matched packed D0 control, fixed BUILD_ID=entropy-matched |
+| 2026-11-25 | #987 / urt 76b8145 | ldc 1.42.0 | 1,019,846 | 87,928 | - | packed image -95 B; text -188, rodata -32, data/bss flat; no SEC_ENG access, bounded CTR-DRBG from one-use seed |
+| 2026-11-25 | #987 unmerged wipe probe | ldc 1.42.0 | 1,019,846 | 87,928 | - | rebuilt packed payload byte-identical to 76b8145; no D0 hardware TRNG or state changes |
+| 2026-11-25 | #987 / urt c7296ee | ldc 1.42.0 | 1,019,846 | 87,928 | - | final rebuilt payload byte-identical to 76b8145/probe, -95 B vs control; text -188, rodata -32, data/bss flat |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 

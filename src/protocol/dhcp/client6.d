@@ -10,7 +10,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem.temp : tconcat;
-import urt.rand;
+import urt.crypto.random : crypto_random_bytes;
 import urt.string;
 import urt.time;
 
@@ -129,8 +129,8 @@ protected:
             _subscribed = true;
         }
 
-        if (_phase == Phase.init_)
-            begin_exchange(Phase.soliciting);
+        if (_phase == Phase.init_ && !begin_exchange(Phase.soliciting))
+            return CompletionStatus.error;
 
         return _phase == Phase.bound ? CompletionStatus.complete : CompletionStatus.continue_;
     }
@@ -229,11 +229,17 @@ private:
         restart();
     }
 
-    void begin_exchange(Phase phase)
+    bool begin_exchange(Phase phase)
     {
+        uint txid;
+        if (crypto_random_bytes((cast(ubyte*)&txid)[0 .. txid.sizeof]).failed)
+        {
+            log.error("secure random source unavailable");
+            return false;
+        }
         MonoTime now = getTime();
         _phase = phase;
-        _txid = rand() & 0xFFFFFF;
+        _txid = txid & 0xFFFFFF;
         _retry_count = 0;
         _request_started = now;
         if (phase == Phase.soliciting)
@@ -243,6 +249,7 @@ private:
             _pd_hints.clear();
         }
         arm_retransmit(now);
+        return true;
     }
 
     void arm_retransmit(MonoTime when)
@@ -267,7 +274,8 @@ private:
                 if (_retry_count >= max_retries)
                 {
                     log.warning("no response after ", _retry_count, _phase == Phase.soliciting ? " SOLICIT" : " REQUEST", " attempts; restarting");
-                    begin_exchange(Phase.soliciting);
+                    if (!begin_exchange(Phase.soliciting))
+                        restart();
                     return;
                 }
                 send_ia_message(_phase == Phase.soliciting ? Dhcp6MsgType.solicit : Dhcp6MsgType.request);
@@ -288,13 +296,19 @@ private:
         }
     }
 
-    void arm_lease_timer(MonoTime now)
+    void arm_lease_timer(MonoTime now, MonoTime retry_at = no_expiry)
     {
-        MonoTime next = _lease.earliest_expiry();
-        if (_phase == Phase.bound && _lease.t1 < next)
-            next = _lease.t1;
-        else if (_phase == Phase.renewing && _lease.t2 < next)
-            next = _lease.t2;
+        MonoTime next = retry_at;
+        if (next == no_expiry)
+        {
+            if (_phase == Phase.bound)
+                next = _lease.t1;
+            else if (_phase == Phase.renewing)
+                next = _lease.t2;
+        }
+        MonoTime expiry = _lease.earliest_expiry();
+        if (expiry < next)
+            next = expiry;
         MonoTime deprecation = _lease.next_deprecation(now);
         if (deprecation < next)
             next = deprecation;
@@ -321,11 +335,13 @@ private:
         }
         reconcile();
 
-        if (_phase == Phase.bound && now >= _lease.t1)
-            begin_exchange(Phase.renewing);
-        else if (_phase == Phase.renewing && now >= _lease.t2)
-            begin_exchange(Phase.rebinding);
-
+        Phase next = now >= _lease.t2 ? Phase.rebinding : Phase.renewing;
+        if ((_phase == Phase.bound && now >= _lease.t1 || _phase == Phase.renewing && now >= _lease.t2) &&
+            !begin_exchange(next))
+        {
+            arm_lease_timer(now, now + 1.seconds);
+            return;
+        }
         arm_lease_timer(now);
     }
 
@@ -359,8 +375,14 @@ private:
         if (!s)
             return;
 
+        uint txid = _txid;
+        if (type == Dhcp6MsgType.release_ && crypto_random_bytes((cast(ubyte*)&txid)[0 .. txid.sizeof]).failed)
+        {
+            log.error("secure random source unavailable");
+            return;
+        }
         Dhcp6Build b;
-        b.start(type, _txid);
+        b.start(type, txid & 0xFFFFFF);
         ubyte[duid_ll_size] duid = duid_ll(s.mac);
         b.add_option(Dhcp6Option.client_id, duid[]);
         if (type != Dhcp6MsgType.solicit && type != Dhcp6MsgType.rebind && _server_duid_len)
@@ -472,7 +494,8 @@ private:
                     return;
                 _server_duid[0 .. sid.length] = sid[];
                 _server_duid_len = cast(ubyte)sid.length;
-                begin_exchange(Phase.requesting);
+                if (!begin_exchange(Phase.requesting))
+                    restart();
                 return;
 
             case Dhcp6MsgType.reply:
@@ -829,6 +852,25 @@ enum MACAddress ether_multicast_dhcp6 = MACAddress(0x33, 0x33, 0x00, 0x01, 0x00,
 
 unittest
 {
+    {
+        import urt.crypto.random : crypto_random_override;
+        import urt.mem : alloc, free;
+        import urt.result : InternalResult;
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            return InternalResult.failed;
+        };
+        scope(exit) crypto_random_override = null;
+        DHCP6Client client = alloc!DHCP6Client(CID(77));
+        scope(exit) free(client);
+        client._phase = DHCP6Client.Phase.bound;
+        client._txid = 0x1234;
+        assert(!client.begin_exchange(DHCP6Client.Phase.renewing));
+        assert(client._phase == DHCP6Client.Phase.bound && client._txid == 0x1234 && !client._retransmit_armed);
+        assert(!client.begin_exchange(DHCP6Client.Phase.rebinding));
+        assert(client._phase == DHCP6Client.Phase.bound && client._txid == 0x1234 && !client._retransmit_armed);
+    }
+
     MonoTime now = MonoTime(1_000_000_000_000);
     IPv6Addr a = IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
     IPv6Addr b = IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);

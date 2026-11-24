@@ -541,7 +541,7 @@ nothrow @nogc:
 
         import manager.stats : create_system_device;
         devices.node = node_id();
-        create_system_device();
+        create_system_device(devices.node);
 
         MonoTime now = getTime();
         schedule(now, &tick);

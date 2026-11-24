@@ -40,6 +40,12 @@ ifdef BOARD
     CPU_HZ ?= $(BOARD_CPU_HZ)
 endif
 
+ifeq ($(PLATFORM),mt7621)
+    ifneq ($(BOARD_PLATFORM),mt7621)
+        $(error PLATFORM=mt7621 requires BOARD=rb760igs for hardware identity)
+    endif
+endif
+
 # Flash coredumps require both ESP-IDF support and a dedicated partition. Keep
 # the feature opt-in so ordinary images retain all available storage.
 COREDUMP ?= 0

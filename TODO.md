@@ -1,5 +1,7 @@
 # TODO
 
+- **BL808 D0 entropy policy:** no periodic reseed; state compromise loses prediction resistance until a fresh M0 boot seed (PM-accepted for this device class); fail closed after 2^31 - 2 Generate calls.
+
 - **CI is held off release compilers by dlang/dmd#23605**: on 32-bit x86, a D-declared subclass of
   an `extern(C++)` root gets its generated `__aggrDtor` with D linkage while the virtual call uses
   the C++ convention, so the destructor receives the vtbl pointer as `this` (fixed by #23606 in

@@ -57,6 +57,7 @@ nothrow @nogc:
         gatt_ready,
         session_info_xchg,
         awaiting_approval,
+        info_ready,
         info_xchg,
         ready,
         failed,
@@ -194,6 +195,7 @@ protected:
             case Phase.connecting:
                 return _client is null ? "Waiting for BLE client" : "Connecting to vehicle";
             case Phase.gatt_ready:
+            case Phase.info_ready:
             case Phase.session_info_xchg:
             case Phase.info_xchg:         return "Establishing session";
             case Phase.awaiting_approval: return "Tap an enrolled key card on the console to authorise";
@@ -328,10 +330,12 @@ private:
                 return CompletionStatus.continue_;
 
             case Phase.gatt_ready:
-                send_session_info_request(TeslaDomain.vehicle_security);
-                version (DebugTeslaSession)
-                    log.trace("sent SessionInfoRequest, state=session_info_xchg");
-                _phase = Phase.session_info_xchg;
+            case Phase.info_ready:
+                if (_last_request_time != MonoTime.init && now - _last_request_time < retry_interval)
+                    return CompletionStatus.continue_;
+                TeslaDomain domain = _phase == Phase.gatt_ready ? TeslaDomain.vehicle_security : TeslaDomain.infotainment;
+                if (send_session_info_request(domain))
+                    _phase = domain == TeslaDomain.vehicle_security ? Phase.session_info_xchg : Phase.info_xchg;
                 return CompletionStatus.continue_;
 
             case Phase.session_info_xchg:
@@ -730,6 +734,7 @@ private:
     // The fresh request UUID is the SessionInfo HMAC challenge.
     bool send_session_info_request(TeslaDomain domain)
     {
+        _last_request_time = getTime();
         Secret secret = _scanner.secret;
         if (!secret)
             return false;
@@ -746,15 +751,19 @@ private:
 
         if (!_routing_seeded)
         {
-            crypto_random_bytes(_routing_address[]);
+            if (crypto_random_bytes(_routing_address[]).failed)
+                return false;
             _routing_seeded = true;
         }
-        crypto_random_bytes(_request_uuid[]);
+        ubyte[16] request_uuid = void;
+        if (crypto_random_bytes(request_uuid).failed)
+            return false;
+        Array!ubyte msg = build_session_info_request(domain, sec1[], _routing_address[], request_uuid[]);
+        if (!write_tesla_frame(msg[]))
+            return false;
+        _request_uuid = request_uuid;
         _info_domain = domain;
-
-        Array!ubyte msg = build_session_info_request(domain, sec1[], _routing_address[], _request_uuid[]);
-        _last_request_time = getTime();
-        return write_tesla_frame(msg[]);
+        return true;
     }
 
     // Frames may span multiple ATT notifications.
@@ -999,8 +1008,8 @@ private:
         else
         {
             log.info("trust verified for VIN '", name[], "', establishing infotainment session");
-            send_session_info_request(TeslaDomain.infotainment);
-            _phase = Phase.info_xchg;
+            _phase = Phase.info_ready;
+            _last_request_time = MonoTime.init;
         }
     }
 
@@ -1469,7 +1478,8 @@ private:
         ubyte[32] aad = sha_finalise(sha);
 
         ubyte[12] nonce = void;
-        crypto_random_bytes(nonce[]);
+        if (crypto_random_bytes(nonce[]).failed)
+            return false;
 
         Array!ubyte ciphertext;
         ciphertext.resize(plaintext.length);
@@ -1483,11 +1493,13 @@ private:
 
         if (!_routing_seeded)
         {
-            crypto_random_bytes(_routing_address[]);
+            if (crypto_random_bytes(_routing_address[]).failed)
+                return false;
             _routing_seeded = true;
         }
         ubyte[16] uuid = void;
-        crypto_random_bytes(uuid[]);
+        if (crypto_random_bytes(uuid[]).failed)
+            return false;
 
         Array!ubyte msg = build_signed_routable_message(domain, ciphertext[], signer_sec1[], _epoch[], nonce[], _counter, expires_at, tag[], _routing_address[], uuid[], flags);
         PendingCommand* pending = reserve_pending_command(uuid[], tag[], kind);
@@ -1560,6 +1572,7 @@ private:
 unittest
 {
     import urt.mem : alloc, free;
+
 
     TeslaVehicleSession unready = alloc!TeslaVehicleSession(CID(1));
     scope(exit) free(unready);
@@ -1875,4 +1888,103 @@ unittest
     s._last_rx_time = now;
     assert(s.advance(now) == CompletionStatus.error);
     assert(!s.validate() && !s.retry.failures[0].latched);
+}
+
+unittest
+{
+    import urt.mem : alloc, free;
+    import manager.features : has_ec_secret;
+
+    version (Windows) enum test_key_file = true;
+    else version (Posix) enum test_key_file = true;
+    else enum test_key_file = false;
+    static if (test_key_file && has_ec_secret)
+    {
+        Application app = create_application();
+        scope(exit) shutdown_application();
+
+        import urt.crypto.random : crypto_random_override;
+        import urt.file : get_temp_filename, delete_file;
+        import protocol.ble.att : ATTResponseDelegate;
+
+        static class Writer : BLEClient
+        {
+        nothrow @nogc:
+            ~this() {}
+            this() { super(CID(6)); }
+            bool accept;
+            uint writes;
+            override bool write(ushort handle, const(ubyte)[] data, bool with_response = true, ATTResponseDelegate callback = null)
+            {
+                ++writes;
+                return accept;
+            }
+        }
+
+        char[320] key_buffer = void;
+        char[] key_path = key_buffer[];
+        assert(get_temp_filename(key_path, "", "tesla-entropy"));
+        scope(exit) delete_file(key_path);
+        assert(delete_file(key_path));
+        Secret secret = Collection!Secret().create("tesla-entropy-key");
+        scope(exit) secret.destroy();
+        secret.kind = SecretKind.ec_p256;
+        secret.key_file = key_path.make_string();
+        assert(secret.public_key_raw.length == 64);
+        TeslaVehicleScanner scanner = alloc!TeslaVehicleScanner(CID(7));
+        scope(exit) free(scanner);
+        scanner.secret = secret;
+        Writer writer = alloc!Writer();
+        scope(exit) free(writer);
+        TeslaVehicleSession request = alloc!TeslaVehicleSession(CID(8));
+        scope(exit) free(request);
+        request._scanner = scanner;
+        request._client = writer;
+        request._tx_handle = 1;
+        request._routing_seeded = true;
+        request._routing_address[] = 0x22;
+        request._request_uuid[] = 0x11;
+        request._info_domain = TeslaDomain.vehicle_security;
+        ubyte[16] outstanding = request._request_uuid;
+        scope(exit) crypto_random_override = null;
+
+        foreach (phase; [request.Phase.gatt_ready, request.Phase.info_ready])
+        {
+            request._phase = phase;
+            request._last_request_time = MonoTime.init;
+            request._last_rx_time = getTime();
+            crypto_random_override = (ubyte[] bytes) nothrow @nogc
+            {
+                bytes[] = 0x33;
+                return InternalResult.failed;
+            };
+            assert(request.advance() == CompletionStatus.continue_);
+            assert(request._phase == phase && writer.writes == 0);
+            assert(request._request_uuid == outstanding && request._info_domain == TeslaDomain.vehicle_security);
+            assert(request._last_request_time != MonoTime.init);
+            MonoTime attempted = request._last_request_time;
+            crypto_random_override = (ubyte[] bytes) nothrow @nogc
+            {
+                bytes[] = 0x44;
+                return InternalResult.success;
+            };
+            assert(request.advance(attempted) == CompletionStatus.continue_);
+            assert(writer.writes == 0 && request._last_request_time == attempted);
+
+            request._last_request_time = MonoTime.init;
+            assert(request.advance() == CompletionStatus.continue_);
+            assert(request._phase == phase && writer.writes == 1);
+            assert(request._request_uuid == outstanding && request._info_domain == TeslaDomain.vehicle_security);
+            request._last_request_time = MonoTime.init;
+            writer.accept = true;
+            assert(request.advance() == CompletionStatus.continue_);
+            assert(request._phase == (phase == request.Phase.gatt_ready ? request.Phase.session_info_xchg : request.Phase.info_xchg));
+            assert(request._request_uuid[0] == 0x44);
+            assert(request._info_domain == (phase == request.Phase.gatt_ready ? TeslaDomain.vehicle_security : TeslaDomain.infotainment));
+            writer.accept = false;
+            writer.writes = 0;
+            request._request_uuid = outstanding;
+            request._info_domain = TeslaDomain.vehicle_security;
+        }
+    }
 }

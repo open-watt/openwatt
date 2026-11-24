@@ -10,7 +10,7 @@ import urt.log;
 import urt.mem : memmove;
 import urt.mem;
 import urt.mem.pagepool;
-import urt.rand;
+import urt.crypto.random : crypto_random_bytes;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
@@ -169,8 +169,11 @@ protected:
         {
             // Generate a 16-byte random nonce, base64-encoded, as the Sec-WebSocket-Key.
             align(4) ubyte[16] nonce = void;
-            foreach (i; 0 .. 4)
-                (cast(uint*)nonce.ptr)[i] = rand();
+            if (crypto_random_bytes(nonce).failed)
+            {
+                log.error("secure random source unavailable");
+                return CompletionStatus.error;
+            }
             char[base64_encode_length(16)] key_b64 = void;
             base64_encode(nonce[], key_b64[]);
             _handshake_key = key_b64[].make_string();
@@ -290,7 +293,12 @@ protected:
         ubyte[4] mask_key = 0;
         if (!_is_server)
         {
-            *cast(uint*)mask_key.ptr = rand();
+            if (crypto_random_bytes(mask_key).failed)
+            {
+                log.error("secure random source unavailable");
+                restart();
+                return -1;
+            }
             header[header_len .. header_len + 4][0..4] = mask_key[];
             header_len += 4;
         }
@@ -471,7 +479,11 @@ private:
                     }
                     else
                         ping_payload[0 .. payload_len] = cast(const(ubyte)[])msg[offset .. offset + payload_len];
-                    send_control_frame(10, ping_payload[0 .. payload_len]);
+                    if (send_control_frame(10, ping_payload[0 .. payload_len]) == ControlFrameResult.no_entropy)
+                    {
+                        restart();
+                        return;
+                    }
                     frame_start += msg_len;
                     continue;
 
@@ -572,10 +584,17 @@ private:
         }
     }
 
-    void send_control_frame(ubyte opcode, const(ubyte)[] payload)
+    enum ControlFrameResult : ubyte
+    {
+        blocked,
+        queued,
+        no_entropy,
+    }
+
+    ControlFrameResult send_control_frame(ubyte opcode, const(ubyte)[] payload)
     {
         if (!_stream || !_stream.running)
-            return;
+            return ControlFrameResult.blocked;
         assert(payload.length <= 125, "control frame payload must be <= 125 bytes");
 
         ubyte[2 + 4 + 125] frame = void;
@@ -586,7 +605,11 @@ private:
         if (!_is_server)
         {
             align(4) ubyte[4] mask = void;
-            *cast(uint*)mask.ptr = rand();
+            if (crypto_random_bytes(mask).failed)
+            {
+                log.error("secure random source unavailable");
+                return ControlFrameResult.no_entropy;
+            }
             frame[len .. len + 4][0..4] = mask[];
             len += 4;
             foreach (i; 0 .. payload.length)
@@ -597,8 +620,9 @@ private:
         len += payload.length;
 
         if (!admit_tx(len) || !queue_frame(frame[0 .. len], null, null))
-            return;
+            return ControlFrameResult.blocked;
         arm_tx();
+        return ControlFrameResult.queued;
     }
 
     // a frame packs behind the one before it, masked with a client's key; one the pages cannot hold is refused whole,
@@ -940,6 +964,18 @@ unittest
     WebSocket ws = alloc!WebSocket(CID(1));
     scope (exit) free(ws);
 
+    {
+        import urt.crypto.random : crypto_random_override;
+        import urt.result : InternalResult;
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            return InternalResult.failed;
+        };
+        scope(exit) crypto_random_override = null;
+        Packet* packet = alloc_packet!RawFrame(cast(const(ubyte)[])"no weak mask");
+        assert(ws.transmit(packet, null, null) < 0 && ws.tx_queued == 0);
+    }
+
     // a header alone, declaring a 64-bit length: read as the parser would see it, with nothing behind
     ulong parse(ulong len, ubyte first = 0x82)
     {
@@ -965,6 +1001,7 @@ unittest
     assert(parse(70_000, 0x83) == 1 && parse(70_000, 0x8B) == 1 && parse(1, 0x8F) == 1);
     assert(parse(125, 0x89) == 0 && ws._message.length == 14);
     ws._message.clear();
+
 
     // a frame larger than a page is queued across pages, and a client's body is masked in the copy
     {
@@ -1004,5 +1041,71 @@ unittest
             assert(ws.queue_frame(header[], body[], null));
         assert(!ws.tx_ready, "a page queued holds the producer until TCP takes it");
         ws.free_tx_queue();
+    }
+}
+
+unittest
+{
+    Application app = create_application();
+    scope(exit) shutdown_application();
+
+    import urt.crypto.random : crypto_random_override;
+    import urt.result : InternalResult;
+
+    static class Transport : Stream
+    {
+    nothrow @nogc:
+        ~this() {}
+        enum type_name = "websocket-entropy-transport";
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Transport, id, flags);
+        }
+    }
+    static struct Consumer
+    {
+        uint received;
+        void recv(const(Packet)*, BaseInterface, PacketDirection, void*) nothrow @nogc
+        {
+            ++received;
+        }
+    }
+
+    Transport transport = Collection!Transport().create("websocket-entropy-transport");
+    scope(exit)
+    {
+        transport.destroy();
+        Collection!Stream().update_all();
+    }
+    assert(transport.running);
+    foreach (destroying; [false, true])
+    {
+        WebSocket client = Collection!WebSocket().create(destroying ? "websocket-entropy-close" : "websocket-entropy-pong");
+        client.stream(transport);
+        // Start past the completed HTTP upgrade, retaining the real shutdown lifecycle.
+        client._subscribed = true;
+        Collection!BaseInterface().update_all();
+        assert(client.running && client.tx_queued == 0);
+        Consumer consumer;
+        PacketFilter filter;
+        client.subscribe(&consumer.recv, filter);
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            return InternalResult.failed;
+        };
+        scope(exit) crypto_random_override = null;
+        if (destroying)
+            client.destroy();
+        else
+        {
+            // A failed pong tears down the parser before the following data frame is dispatched.
+            client._message ~= cast(const(ubyte)[])"\x89\x01p\x82\x01x";
+            client.parse_frames(getTime());
+            assert(!client.running && client._message.empty && consumer.received == 0);
+            assert(client.tx_queued == 0);
+            client.destroy();
+        }
+        assert(client.tx_queued == 0 && transport.running);
+        Collection!BaseInterface().update_all();
     }
 }

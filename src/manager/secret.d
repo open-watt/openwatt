@@ -9,7 +9,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem;
-import urt.rand;
+import urt.crypto.random : crypto_random_bytes;
 import urt.result;
 import urt.string;
 
@@ -129,11 +129,11 @@ nothrow @nogc:
         }
         return buf[0 .. o];
     }
-    void password(const(char)[] value)
+    StringResult password(const(char)[] value)
     {
         if (try_set_mcf(value))
-            return;
-        set_password(cast(ubyte[])value, _function);
+            return StringResult.success;
+        return set_password(cast(ubyte[])value, _function);
     }
 
     const(char)[] plaintext() const pure
@@ -145,22 +145,22 @@ nothrow @nogc:
 
     HashFunction algorithm() const pure
         => _function;
-    void algorithm(HashFunction value)
+    StringResult algorithm(HashFunction value)
     {
         if (_function == value)
         {
             mark_set!(typeof(this), "algorithm")();
-            return;
+            return StringResult.success;
         }
         if (_function == HashFunction.plain_text)
         {
             // we can re-hash a plaintext password
-            set_password(_hash[], value);
+            return set_password(_hash[], value);
         }
         else if (!_plaintext.empty)
         {
             Array!ubyte keep = _plaintext[];
-            set_password(keep[], value);
+            return set_password(keep[], value);
         }
         else
         {
@@ -169,6 +169,7 @@ nothrow @nogc:
             _hash = null;
             mark_set!(typeof(this), [ "algorithm", "password" ])();
         }
+        return StringResult.success;
     }
 
     const(char)[][] services() const
@@ -355,7 +356,7 @@ private:
     Map!(String, Service) _services;
     String _def_profile;
 
-    void set_password(ubyte[] password, HashFunction hash_function)
+    StringResult set_password(ubyte[] password, HashFunction hash_function)
     {
         if (hash_function == HashFunction.plain_text)
         {
@@ -364,8 +365,10 @@ private:
         }
         else
         {
-            for (size_t i = 0; i < 16; i += uint.sizeof)
-                *cast(uint*)&_salt[i] = rand();
+            ubyte[16] salt = void;
+            if (crypto_random_bytes(salt).failed)
+                return StringResult("secure random source unavailable");
+            _salt = salt;
             // copy before _hash is replaced: the re-hash path passes a slice of the old _hash
             Array!ubyte keep = password[];
             _plaintext = keep.move;
@@ -375,6 +378,7 @@ private:
         if (hash_function != HashFunction.plain_text)
             store_secret_material(_hash[], _plaintext[]);
         mark_set!(typeof(this), [ "password", "algorithm" ])();
+        return StringResult.success;
     }
 
     bool try_set_mcf(const(char)[] value)
@@ -673,4 +677,27 @@ Array!ubyte hash_password(const ubyte[] password, const ubyte[] salt, HashFuncti
             assert(false, "Unsupported hash function");
     }
     return hash;
+}
+
+unittest
+{
+    import urt.crypto.random : crypto_random_override;
+
+    Secret secret = alloc!Secret(CID(1));
+    scope(exit) free(secret);
+    assert(secret.password("previous").succeeded);
+    crypto_random_override = (ubyte[] bytes) nothrow @nogc
+    {
+        return InternalResult.failed;
+    };
+    scope(exit) crypto_random_override = null;
+    assert(secret.algorithm(HashFunction.sha256).failed);
+    assert(secret.algorithm == HashFunction.plain_text && secret.plaintext == "previous");
+
+    secret._function = HashFunction.sha256;
+    secret._salt[] = 7;
+    secret._hash = hash_password(cast(ubyte[])"previous", secret._salt[], secret._function);
+    Array!ubyte previous = secret._hash[];
+    assert(secret.password("replacement").failed);
+    assert(secret._hash[] == previous[] && secret._salt[0] == 7);
 }
