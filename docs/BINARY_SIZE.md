@@ -69,6 +69,14 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-15 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | master, matched control for #946 |
+| 2026-11-15 | ad404872 | ldc 1.43.0 | 3,889,096 | 153,592 | - | comparison only: old #946 1c1d77e8 rebased onto cd7edf82; +1,132 B |
+| 2026-11-15 | #946 | ldc 1.43.0 | 3,888,344 | 153,592 | - | validated OWS prefix, shared warning and bucket-array ownership transfer; +380 B, static RAM unchanged |
+
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 3,878,352 | 153,592 | - | #946 matched master control; fixed BUILD_ID=c5c2e70bfc71 |
+| 2026-11-24 | #946 shared-helper probe | ldc 1.43.0 | 3,879,068 | 153,592 | - | discarded predicate-sharing trial; +716 B vs c5c2e70b |
+| 2026-11-24 | ebe13f82 | ldc 1.43.0 | 3,878,812 | 153,592 | - | #946 disk codec, tick and nested-format checks; +460 B vs c5c2e70b, RAM flat |
+| 2026-11-24 | 50331e60 | ldc 1.43.0 | 3,878,828 | 153,592 | - | #946 rejects past-EOF offsets before reads; +476 B vs c5c2e70b, RAM flat |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -221,6 +229,10 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-24 | 0f8bd52d | ldc 1.43.0 | 1,601,796 | 46,428 | 4,194,304 | #983 runtime-owned process pool, urt c127e542; +80 B, RAM flat |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 source with size-fix probes, not its pinned runtime; startup-only, forwarding and final shared-iterator probes all image-neutral; final sections match 79b58c6d; BUILD_ID=unknown |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | merged #418 pin, same tree as measured 5218fe63; size-neutral vs 79b58c6d |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #946 matched master control; fixed BUILD_ID=unknown |
+| 2026-11-24 | #946 shared-helper probe | ldc 1.43.0 | 1,601,732 | 46,428 | 4,194,304 | discarded predicate-sharing trial; +16 B vs c5c2e70b |
+| 2026-11-24 | ebe13f82 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #946 disk checks compiled out; image, sections and RAM identical to c5c2e70b |
+| 2026-11-24 | 50331e60 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #946 past-EOF offset guard; image, sections and RAM still identical to c5c2e70b |
 
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
