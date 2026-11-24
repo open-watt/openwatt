@@ -334,10 +334,7 @@ void shutdown_application()
 Mod get_module(Mod)()
     if (is(Mod : Module))
 {
-    __gshared Mod g_module_instance = null;
-    if (!g_module_instance)
-        g_module_instance = cast(Mod)cast(void*)g_app.module_instance(Mod.ModuleName);
-    return g_module_instance;
+    return g_app.module_instance!Mod();
 }
 
 
@@ -2691,4 +2688,20 @@ unittest
     }
     thread_join(consumer);
     assert(lost == 0, "a coalesced ring lost the work before it");
+}
+
+
+unittest
+{
+    import manager.log : LogModule;
+
+    Application first = create_application();
+    LogModule previous = get_module!LogModule();
+    assert(previous is first.module_instance!LogModule());
+    shutdown_application();
+    assert(g_app is null);
+
+    Application second = create_application();
+    scope(exit) shutdown_application();
+    assert(get_module!LogModule() is second.module_instance!LogModule());
 }
