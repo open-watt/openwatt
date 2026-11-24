@@ -683,12 +683,7 @@ private:
 
 unittest
 {
-    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
-
     import router.stream.memory : MemoryMode, MemoryStream;
-
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
 
     auto clients = Collection!MQTTClient();
     auto streams = Collection!MemoryStream();

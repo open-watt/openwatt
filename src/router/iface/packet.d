@@ -786,9 +786,6 @@ static if (has_framing_diagnostics)
 
 unittest
 {
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
-
     Packet* owned = alloc_packet!RawFrame(4);
     assert(owned && owned.packet_page_offset == packet_page_start);
     assert(owned.page.offset == packet_page_start + Packet.sizeof + packet_headroom);

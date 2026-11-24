@@ -213,11 +213,6 @@ nothrow @nogc:
 version (FreeStanding) {}
 else unittest
 {
-    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
-
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
-
     char[320] buffer = void;
     char[] name = buffer[];
     assert(get_temp_filename(name, "", "fileproducer"));

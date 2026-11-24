@@ -1658,10 +1658,6 @@ private:
 unittest
 {
     import urt.mem;
-    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
-
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
 
     Console* console = alloc!Console(null, StringLit!"test.session");
 

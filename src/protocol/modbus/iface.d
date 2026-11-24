@@ -1445,11 +1445,8 @@ bool valid_function_code(FunctionCode function_code)
 
 unittest
 {
-    import urt.mem.pagepool : page_category, page_free, page_pool_deinit, page_pool_init;
+    import urt.mem.pagepool : page_category, page_free;
     import router.stream.memory : MemoryMode, MemoryStream;
-
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
 
     ubyte[253] bytes;
     StackPacket lent;
