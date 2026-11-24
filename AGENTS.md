@@ -63,8 +63,6 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - Special platforms: `bin/$(PLATFORM)_$(CONFIG)/` (e.g., `bin/routeros_release/`)
 - Generic platforms: `bin/$(ARCH)_$(OS)_$(CONFIG)/` (e.g., `bin/arm64_linux_release/`)
 
-Note: output paths don't include `$(FEATURES)`, so switching presets in the same tree currently won't trigger a rebuild — `make clean` between FEATURES changes.
-
 **Special platform: `routeros`**
 - Builds statically-linked ARM64 binary for MikroTik RouterOS
 - Automatically packages binary into minimal Alpine-based container

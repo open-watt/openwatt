@@ -81,6 +81,11 @@ jobs:
         if: ${{ success() && (matrix.arch == 'x86_64' || matrix.arch == 'x86' || matrix.arch == 'arm64') }}
         run: ./bin/${{ matrix.arch }}_${{ matrix.os }}_unittest/openwatt_test
 
+      - name: Test build stamps
+        if: ${{ matrix.arch == 'x86_64' && matrix.compiler == 'dmd' }}
+        shell: bash
+        run: python test/test_build_stamps.py ARCH=x86_64 OS=${{ matrix.os }}
+
       - name: Upload release binary
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' && matrix.compiler == 'ldc' }}
         uses: actions/upload-artifact@v4
