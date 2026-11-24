@@ -71,11 +71,14 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
 | 2026-11-25 | 096172ce | ldc 1.43.0 | 3,807,328 | 153,592 | - | #989 matched control, BUILD_ID=module-index-matched, urt a448e54 |
 | 2026-11-25 | #989 | ldc 1.43.0 | 3,805,064 | 153,528 | - | -2,264 B / -64 B RAM vs 096172ce; indexed module lookup, two-phase bounded drain, module pre_deinit/deinit pairs |
+| 2026-11-25 | #988 | ldc 1.43.0 | 3,739,952 | 153,528 | - | Windows native-IP receive storage on demand; -65,112 B vs #989 23836c8d, static RAM flat; endpoint heap 65,880 -> 136 B, a native-IP endpoint and its operation +8 B |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | c5c2e70b | ldc 1.43.0 | 4,054,364 | 431,316 | - | #988 matched control, BUILD_ID=udp-recv-measure, urt c47834e6 |
+| 2026-11-25 | #988 | ldc 1.43.0 | 4,054,364 | 431,316 | - | #988 on c5c2e70b, before its rebase onto #989; same fixed BUILD_ID and runtime; complete ELF byte-identical to control, Windows storage change compiled out |
 
 ### arm64 linux (Raspberry Pi), `make ARCH=arm64 OS=linux CONFIG=release`
 

@@ -5,7 +5,7 @@ import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
-import urt.mem : alloc;
+import urt.mem : alloc, free;
 import urt.mem.pagepool;
 import urt.mem.temp;
 import urt.meta.nullable;
@@ -1679,6 +1679,12 @@ nothrow @nogc:
                 ws_closesocket(socket);
                 return false;
             }
+            _recv = alloc!RecvFromOp();
+            if (!_recv)
+            {
+                ws_closesocket(socket);
+                return false;
+            }
             _owner = owner;
             _handle = socket;
             _family = family;
@@ -1687,6 +1693,7 @@ nothrow @nogc:
             {
                 ws_closesocket(socket);
                 _handle = INVALID_SOCKET;
+                backend_release();
                 return false;
             }
             return true;
@@ -2021,9 +2028,13 @@ private:
         IOCP_SOCKET _handle = INVALID_SOCKET;
         AddressFamily _family;
         int  _outstanding;
-        RecvFromOp _recv;
+        RecvFromOp* _recv;
 
-        void backend_release() {}
+        void backend_release()
+        {
+            free(_recv);
+            _recv = null;
+        }
 
         bool backend_reclaimable() const
             => _outstanding == 0;
@@ -3151,4 +3162,56 @@ else version (Windows)
         assert(result.complete && result.succeeded && result.bytes == data.length);
         assert(cast(const(char)[])data[] == "live");
     }
+}
+
+version (UseInternalIPStack) {} else version (Windows)
+unittest
+{
+    import urt.mem.pressure : sample_pool_usage;
+    import manager : create_application, shutdown_application;
+
+    static extern (Windows) int refuse_recv(IOCP_SOCKET, WSAMSG*, uint*, OVERLAPPED*, void*) nothrow @nogc
+    {
+        SockAddrBuf address;
+        int length = address.sizeof;
+        return ws_getsockname(INVALID_SOCKET, &address, &length);
+    }
+
+    create_application();
+    scope(exit) shutdown_application();
+    assert(g_recv_msg);
+    InetAddress loopback = InetAddress(IPAddr.loopback, 0);
+    UDPEndpoint owner;
+    size_t before, after, low, high;
+    sample_pool_usage(0, before, low, high);
+    {
+        LPFN_RECVMSG saved = g_recv_msg;
+        g_recv_msg = &refuse_recv;
+        scope(exit) g_recv_msg = saved;
+        IPUDPState failed;
+        assert(!failed.open(&owner, &loopback, null));
+        assert(failed._recv is null && failed._outstanding == 0 && failed._handle == INVALID_SOCKET);
+        sample_pool_usage(0, after, low, high);
+        assert(after == before, "failed native UDP open retained receive storage");
+    }
+
+    IPUDPState pending;
+    assert(pending.open(&owner, &loopback, null));
+    assert(pending._recv && pending._outstanding == 1);
+    auto operation = pending._recv;
+    sample_pool_usage(0, after, low, high);
+    assert(after - before == IPUDPState.RecvFromOp.sizeof);
+    pending.close();
+    assert(!pending.reclaimable && pending._recv is operation);
+    MonoTime deadline = getTime() + 2.seconds;
+    while (!pending.reclaimable && getTime() < deadline)
+    {
+        g_app.reactor.reset();
+        g_app.reactor.wait(deadline - getTime());
+    }
+    assert(pending.reclaimable && pending._recv is operation);
+    pending.release();
+    assert(pending._recv is null);
+    sample_pool_usage(0, after, low, high);
+    assert(after == before, "closed native UDP endpoint retained receive storage");
 }

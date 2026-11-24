@@ -1448,6 +1448,10 @@ this is what remains.
 
 ## Infrastructure
 
+- **Windows native UDP receive buffer** (2026-11-25, #988 review): `RecvFromOp.control` is a plain
+  `ubyte[64]` cast to `WSACMSGHDR*` and is 8-aligned only by the fields before it; give it
+  `align(8)`. `alloc!RecvFromOp` also zero-fills the 64 KiB `buf` on every open although the kernel
+  overwrites it.
 - **Modules outlive their Application** (2026-11-25, #989 review): `shutdown_application` runs
   every `deinit` but never frees the modules, so each recreation in the unit suite leaks one set.
   Freeing them first needs every process registry that holds a module to be Application-scoped
