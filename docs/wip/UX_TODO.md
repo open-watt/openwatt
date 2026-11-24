@@ -3,6 +3,12 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-24: send HELLO first on Sync sessions
+
+openwatt-web and openwatt-droid should send HELLO before subscriptions, per the
+session contract. This is client hygiene: a valid subscription or any other valid
+inbound Sync message also establishes readiness, so existing clients keep working.
+
 ## 2026-11-07: display newly bound scalar sensors as awaiting data
 
 Bindings can announce elements and their formats before the first sample.

@@ -601,6 +601,16 @@ protected:
     }
 
 package:
+    final bool remote_ready() const pure
+        => (_peer_flags & PeerFlags.remote_ready) != 0;
+
+    final void remote_ready(bool value) pure
+    {
+        if (value)
+            _peer_flags |= PeerFlags.remote_ready;
+        else
+            _peer_flags &= ~PeerFlags.remote_ready;
+    }
     struct PendingSub
     {
         String pattern;
@@ -868,6 +878,7 @@ package:
     uint             _unbind_cursor;    // bound objects below it are yet to be checked against the subscriptions
     bool             _introducing;
     bool             _binding;          // a subscription's binds are still being walked
+    // Handshake frames can arrive before startup; introductions wait for a validated inbound message.
     Array!(Array!ubyte) _pre_start;      // frames held until the session can process them
     uint             _pre_start_bytes;
     bool             _pre_start_overflow;
@@ -878,7 +889,7 @@ package:
 
     enum uint min_segment = 32;   // below hello's size, so a peer that can handshake clears it
 
-    ubyte            _remote_caps;       // hello negotiation; 0 = no hello received
+    ubyte            _remote_caps;       // hello negotiation; zero capabilities are valid
     Array!ubyte      _bundle;            // messages of one queue collected for one frame
     TxQueue          _bundle_queue;
     uint             _remote_max_message; // 0 until hello
@@ -976,6 +987,7 @@ private:
         claims               = 1 << 4,
         in_session           = 1 << 5,
         bundle_closed        = 1 << 6,
+        remote_ready         = 1 << 7,
     }
 
     union
@@ -2266,4 +2278,310 @@ unittest
         near.on_rdp_event(wire.a, wire.addr_b, RDPEvent.closed);
         assert(!near.running);
     }
+}
+
+
+unittest
+{
+    import manager.sync.binary_encoder : BinaryEncoder;
+    import manager.sync.json_encoder : JsonEncoder;
+
+    static final class Capture : BaseInterface
+    {
+        enum type_name = "hello-order-capture";
+    nothrow @nogc:
+        ~this() {}
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!Capture, id, flags);
+            _state = flags & ObjectFlags.remote ? State.disabled : State.running;
+            _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+            set_link(true);
+        }
+        override int transmit(Packet* packet, MessageCallback, const(QueuePolicy)*)
+        {
+            scope(exit) packet_free(packet);
+            if (refuse)
+            {
+                auto handler = refuse;
+                refuse = null;
+                handler();
+                return -1;
+            }
+            Array!ubyte bytes;
+            bytes ~= cast(const(ubyte)[])packet.data;
+            frames ~= bytes.move;
+            return 0;
+        }
+        void delegate() nothrow @nogc refuse;
+        Array!(Array!ubyte) frames;
+    }
+    static final class Peer : SyncPeer
+    {
+    nothrow @nogc:
+        this(CID id) { super(id); _state = State.running; }
+        ~this() {}
+        void stop() { _state = State.disabled; }
+        void drain() { _state = State.stopping; }
+        bool invited(BaseInterface) { ++invitations; return false; }
+        uint invitations;
+    }
+
+    SyncModule sync = alloc!SyncModule(null);
+    auto saved_encoders = g_encoders;
+    BinaryEncoder binary = alloc!BinaryEncoder(sync);
+    JsonEncoder json = alloc!JsonEncoder(sync);
+    g_encoders[SyncEncoderKind.binary] = binary;
+    g_encoders[SyncEncoderKind.json] = json;
+    Array!Capture objects;
+    Array!Peer others;
+    register_object_lifecycle_handler(&sync.on_object_lifecycle);
+    Peer authority = alloc!Peer(CID(41));
+    Peer member = alloc!Peer(CID(42));
+    scope(exit)
+    {
+        sync.peers.clear();
+        foreach (p; others[])
+        {
+            while (!p._bound.empty)
+                sync.unbind_from_peer(p, p._bound[$ - 1], 0, false);
+            p.stop();
+            free(p);
+        }
+        foreach (p; [member, authority])
+            while (!p._bound.empty)
+                sync.unbind_from_peer(p, p._bound[$ - 1]);
+        member.stop();
+        authority.stop();
+        free(member);
+        free(authority);
+        foreach (obj; objects[])
+            obj.destroy();
+        Collection!Capture().table.free_pending();
+        unregister_object_lifecycle_handler(&sync.on_object_lifecycle);
+        g_encoders = saved_encoders;
+        free(json);
+        free(binary);
+        free(sync);
+    }
+    Peer rejected = alloc!Peer(CID(43));
+    rejected.stop();
+    scope(exit) free(rejected);
+    sync.inbound_hello(rejected, 0, 16);
+    assert(!rejected.remote_ready, "an invalid HELLO cannot release introductions");
+
+    foreach (i; 0 .. 72)
+        objects ~= Collection!Capture().create(tconcat("hello-order-", i));
+    authority._transport = objects[0];
+    member._transport = objects[1];
+    authority._tx_waiter.handler = &authority.invited;
+    member._tx_waiter.handler = &member.invited;
+    sync.attach_peer(authority);
+    sync.attach_peer(member);
+
+    foreach (p; [authority, member])
+    {
+        assert(!sync.produce(p));
+        assert(p._introduced.empty && p._introducing);
+    }
+    sync.fan_out_add_name(objects[2]);
+    assert(objects[0].frames.empty && objects[1].frames.empty);
+
+    // A zero-capability HELLO is valid; readiness is not inferred from capabilities.
+    uint invited = authority.invitations;
+    json.decode_and_dispatch(authority, cast(const(ubyte)[])`{"kind":"hello","caps":[],"role":"member"}`);
+    assert(authority.invitations > invited);
+    assert(authority._peer_flags & SyncPeer.PeerFlags.remote_ready);
+    assert(authority._remote_caps == 0);
+    assert(!sync.produce(authority) && !authority._introducing);
+    assert(objects[0].frames.length >= 72);
+    assert(member._introducing && objects[1].frames.empty);
+
+    Capture later = Collection!Capture().create("hello-order-later");
+    objects ~= later;
+    size_t before = objects[0].frames.length;
+    sync.fan_out_add_name(later);
+    assert(objects[0].frames.length >= before && objects[1].frames.empty);
+    Capture proxy = Collection!Capture().create("hello-order-proxy", ObjectFlags.remote);
+    objects ~= proxy;
+    sync.authority[proxy.id] = authority;
+    authority._authoritative ~= proxy;
+    sync.inbound_bind(authority, proxy.id, Capture.type_name, 0);
+    assert(member.handle_of(proxy) == SyncPeer.invalid_handle && objects[1].frames.empty);
+    assert(!sync.visible_to(authority, proxy) && sync.visible_to(member, proxy));
+
+    json.decode_and_dispatch(member, cast(const(ubyte)[])`{"kind":"sub","pattern":42}`);
+    json.decode_and_dispatch(member, cast(const(ubyte)[])`{"kind":"unrecognized"}`);
+    ubyte[1] truncated_sub = [cast(ubyte)Verb.sub];
+    binary.decode_and_dispatch(member, truncated_sub[]);
+    assert(!member.remote_ready && objects[1].frames.empty);
+    ubyte[7] missing_patterns = [cast(ubyte)Verb.model_sub, 0, 0, 0, 0, 0, 1];
+    ubyte[2] missing_unsub = [cast(ubyte)Verb.model_unsub, 1];
+    ubyte[3] missing_enum = [cast(ubyte)Verb.type_enum, 0, 1];
+    ubyte[5] missing_values = [cast(ubyte)Verb.val, 0, 0, 0, 1];
+    ubyte[4] missing_suggestions = [cast(ubyte)Verb.suggestions, 0, 0, 1];
+    foreach (frame; [missing_patterns[], missing_unsub[], missing_enum[], missing_values[], missing_suggestions[]])
+    {
+        binary.decode_and_dispatch(member, frame);
+        assert(!member.remote_ready && objects[1].frames.empty);
+    }
+
+    invited = member.invitations;
+    json.decode_and_dispatch(member, cast(const(ubyte)[])`{"kind":"sub","pattern":"hello-order-capture:*"}`);
+    assert(member.remote_ready && member.invitations > invited && member._remote_caps == 0);
+    assert(!sync.produce(member) && !member._introducing && !member._binding);
+    assert(member.handle_of(proxy) != SyncPeer.invalid_handle);
+    bool proxy_bound;
+    foreach (obj; member._bound[])
+        proxy_bound |= obj is proxy;
+    assert(proxy_bound, "a HELLO-less subscriber receives a proxy created while it was gated");
+    assert(objects[1].frames.length > 73);
+
+    // Reconnect starts a fresh registry walk and requires fresh inbound evidence.
+    uint old_gen = member._session_gen;
+    member.remote_ready = false;
+    ++member._session_gen;
+    sync.inbound_ready(member, old_gen);
+    assert(!member.remote_ready, "a stale callback cannot release the replacement session");
+    member._introduced.clear();
+    sync.peers.remove(1);
+    sync.attach_peer(member);
+    before = objects[1].frames.length;
+    assert(!sync.produce(member) && objects[1].frames.length == before);
+    ubyte[1] truncated_fragment = [cast(ubyte)Verb.fragment];
+    binary.decode_and_dispatch(member, truncated_fragment[]);
+    assert(!member.remote_ready);
+    ubyte[2] unsub = [cast(ubyte)Verb.unsub, 0];
+    binary.decode_and_dispatch(member, unsub[]);
+    assert(member.remote_ready);
+    assert(!sync.produce(member) && !member._introducing);
+    assert(objects[1].frames.length > before && member.handle_of(proxy) != SyncPeer.invalid_handle);
+
+    // An upstream detach destroys its proxies without receiving an explicit unbind.
+    objects.remove(objects.length - 1);
+    before = objects[1].frames.length;
+    sync.destroy_proxy(authority, proxy);
+    assert(objects[1].frames.length == before + 1);
+    foreach (obj; member._bound[])
+        assert(obj !is proxy);
+    assert(member.handle_of(proxy) == SyncPeer.invalid_handle);
+    Collection!Capture().table.free_pending();
+    binary.tick_dirty(member);
+    json.tick_dirty(member);
+
+    Capture primary = Collection!Capture().create("hello-order-primary", ObjectFlags.remote);
+    Capture secondary = Collection!Capture().create("hello-order-secondary", ObjectFlags.remote);
+    sync.authority[primary.id] = authority;
+    authority._authoritative ~= primary;
+    before = objects[0].frames.length;
+    sync.inbound_bind(authority, primary.id, Capture.type_name, 0);
+    assert(objects[0].frames.length == before && authority.handle_of(primary) == SyncPeer.invalid_handle);
+
+    foreach (i; 0 .. 3)
+    {
+        Peer p = alloc!Peer(CID(cast(uint)(44 + i)));
+        p._transport = objects[3 + i];
+        p._tx_waiter.handler = &p.invited;
+        others ~= p;
+        sync.attach_peer(p);
+        assert(!sync.produce(p) && p.handle_of(primary) == SyncPeer.invalid_handle);
+        json.decode_and_dispatch(p, cast(const(ubyte)[])`{"kind":"hello","caps":[]}`);
+        assert(!sync.produce(p) && p.handle_of(primary) != SyncPeer.invalid_handle,
+               "a late peer learns an existing proxy without echoing it to its authority");
+        assert(sync.bind_to_peer(p, primary));
+    }
+    Peer explicit_client = alloc!Peer(CID(47));
+    explicit_client._transport = objects[6];
+    explicit_client._tx_waiter.handler = &explicit_client.invited;
+    others ~= explicit_client;
+    sync.attach_peer(explicit_client);
+    sync.inbound_sub(explicit_client, "hello-order-capture:hello-order-0".make_string());
+    assert(!sync.produce(explicit_client));
+    assert(!explicit_client.remote_ready && explicit_client._introducing && !explicit_client._binding);
+    assert(explicit_client._bound.length == 1, "explicit queued responses do not wait for automatic introductions");
+
+    Peer c = others[0], d = others[1], draining = others[2];
+    sync.authority[secondary.id] = c;
+    c._authoritative ~= secondary;
+    assert(sync.bind_to_peer(member, secondary));
+    draining.drain();
+
+    static struct Refusal
+    {
+    nothrow @nogc:
+        SyncModule sync;
+        Peer b, c;
+        Capture b_wire, secondary;
+        void detach(Peer p)
+        {
+            p.stop();
+            while (!p._authoritative.empty)
+                sync.destroy_proxy(p, p._authoritative[$ - 1]);
+            while (!p._bound.empty)
+                sync.unbind_from_peer(p, p._bound[$ - 1], 0, false);
+            foreach (i, peer; sync.peers[])
+                if (peer is p)
+                {
+                    sync.peers.remove(i);
+                    break;
+                }
+            p.stop();
+        }
+        void earlier() { detach(b); }
+        void owner() { detach(c); }
+        void current()
+        {
+            b_wire.refuse = &earlier;
+            sync.destroy_proxy(c, secondary);
+            detach(c);
+        }
+    }
+    Refusal refusal = Refusal(sync, member, c, objects[1], secondary);
+    objects[3].refuse = &refusal.current;
+    size_t later_before = objects[4].frames.length;
+    size_t draining_before = objects[5].frames.length;
+    sync.destroy_proxy(authority, primary);
+    foreach (p; [authority, member, c, d, draining])
+    {
+        assert(sync.find_sync_slot(primary, p) == sync_slot_none);
+        assert(sync.find_sync_slot(secondary, p) == sync_slot_none);
+    }
+    assert(objects[4].frames.length == later_before + 1, "nested removals cannot skip a later subscriber");
+    assert(objects[5].frames.length == draining_before && draining._bound.empty,
+           "a stopping subscriber loses its binding without a wire write");
+    assert(d._bound.empty && c._bound.empty && member._bound.empty);
+    Collection!Capture().table.free_pending();
+    binary.tick_dirty(d);
+    json.tick_dirty(d);
+
+    Peer requester = alloc!Peer(CID(48));
+    requester._transport = objects[7];
+    requester._tx_waiter.handler = &requester.invited;
+    others ~= requester;
+    sync.attach_peer(requester);
+    Capture x = Collection!Capture().create("hello-order-correlated-x", ObjectFlags.remote);
+    Capture y = Collection!Capture().create("hello-order-correlated-y", ObjectFlags.remote);
+    sync.authority[x.id] = authority;
+    authority._authoritative ~= x;
+    sync.authority[y.id] = requester;
+    requester._authoritative ~= y;
+    assert(sync.bind_to_peer(requester, x) && sync.bind_to_peer(d, x));
+    assert(sync.bind_to_peer(authority, y));
+    sync.pending_forwards[123u] = PendingForward(requester, 91, PendingKind.destroy, authority);
+    Refusal correlated = Refusal(sync, requester, authority, objects[7], y);
+    objects[7].refuse = &correlated.earlier;
+    objects[0].refuse = &correlated.owner;
+    later_before = objects[4].frames.length;
+    sync.inbound_unbind(authority, x.id, 123);
+    assert(authority._authoritative.empty && requester._authoritative.empty);
+    assert((123u in sync.pending_forwards) is null);
+    assert(objects[4].frames.length == later_before + 1 && d._bound.empty);
+    foreach (p; [authority, requester, d])
+    {
+        assert(sync.find_sync_slot(x, p) == sync_slot_none);
+        assert(sync.find_sync_slot(y, p) == sync_slot_none);
+    }
+    Collection!Capture().table.free_pending();
+    binary.tick_dirty(d);
+    json.tick_dirty(d);
 }
