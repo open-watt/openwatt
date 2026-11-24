@@ -2271,6 +2271,17 @@ nothrow @nogc:
         g_app.console.register_command!(scan_cmd, "scan")("/interface/wifi", this);
     }
 
+    override void deinit()
+    {
+        unsubscribe_link_changed(&on_link_changed);
+        foreach (wlan; Collection!LinuxWlan().values)
+            if (wlan.flags & ObjectFlags.dynamic)
+                wlan.destroy();
+        foreach (radio; Collection!LinuxWifiRadio().values)
+            if (radio.flags & ObjectFlags.dynamic)
+                radio.destroy();
+    }
+
     override void update()
     {
         // Defer the first adapter discovery until after startup.conf has run, so

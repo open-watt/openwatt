@@ -990,4 +990,11 @@ nothrow @nogc:
     {
         g_app.console.register_collection!BuiltinBLEInterface();
     }
+
+    override void deinit()
+    {
+        foreach (iface; Collection!BuiltinBLEInterface().values)
+            if (iface.flags & ObjectFlags.dynamic)
+                iface.destroy();
+    }
 }

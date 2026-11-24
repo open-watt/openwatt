@@ -605,6 +605,9 @@ nothrow @nogc:
     override void deinit()
     {
         remove_fd_watcher(&service_sockets);
+        foreach (iface; Collection!LinuxBLEInterface().values)
+            if (iface.flags & ObjectFlags.dynamic)
+                iface.destroy();
         if (_fd >= 0)
         {
             close(_fd);

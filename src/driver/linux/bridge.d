@@ -57,6 +57,15 @@ nothrow @nogc:
         register_bridge_offload_hooks(&on_ports_changed, &on_cpu_promisc_changed);
     }
 
+    override void deinit()
+    {
+        unregister_object_state_handler(&on_object_state);
+        register_bridge_offload_hooks(null, null);
+        g_app.cancel(&sync_ports);
+        while (_offloads.length)
+            disengage(_offloads[$ - 1].bridge);
+    }
+
     override void update()
     {
         foreach (o; _offloads[])

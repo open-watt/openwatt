@@ -1387,6 +1387,11 @@ void register_object_state_handler(StateSignalHandler handler) nothrow @nogc
     _on_object_state ~= handler;
 }
 
+void unregister_object_state_handler(StateSignalHandler handler) nothrow @nogc
+{
+    _on_object_state.removeFirst(handler);
+}
+
 ushort sync_state_alloc(BaseObject channel) nothrow @nogc
 {
     ushort slot;

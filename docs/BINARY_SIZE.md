@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-25 | #989 (364da718 source) | ldc 1.43.0 | 3,874,944 | 153,480 | - | registry-only lookup control; -3,408 B image / -112 B RAM vs c5c2e70b; hot-owner changes not included |
+| 2026-11-25 | #989 synchronous owner cleanup | ldc 1.43.0 | 3,875,512 | 153,480 | - | +568 B image vs registry-only control, RAM flat; combined -2,840 B image / -112 B RAM vs c5c2e70b; Windows watcher and latent Sync cleanup remain blocked |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -221,7 +223,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-24 | 0f8bd52d | ldc 1.43.0 | 1,601,796 | 46,428 | 4,194,304 | #983 runtime-owned process pool, urt c127e542; +80 B, RAM flat |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 source with size-fix probes, not its pinned runtime; startup-only, forwarding and final shared-iterator probes all image-neutral; final sections match 79b58c6d; BUILD_ID=unknown |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | merged #418 pin, same tree as measured 5218fe63; size-neutral vs 79b58c6d |
-
+| 2026-11-25 | #989 (364da718 source) | ldc 1.43.0 | 1,601,508 | 46,376 | 4,194,304 | registry-only lookup control; -208 B image / -52 B RAM vs c5c2e70b; BUILD_ID unknown |
+| 2026-11-25 | #989 synchronous owner cleanup | ldc 1.43.0 | 1,601,540 | 46,376 | 4,194,304 | +32 B text/image vs registry-only control, RAM flat; combined -176 B image / -52 B RAM vs c5c2e70b; same compiler flags and support objects |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

@@ -33,6 +33,14 @@ nothrow @nogc:
         sync_adapters();
     }
 
+    override void deinit()
+    {
+        unsubscribe_link_changed(&on_link_changed);
+        foreach (iface; Collection!CANInterface().values)
+            if ((iface.flags & ObjectFlags.dynamic) && !iface.adapter.empty)
+                iface.destroy();
+    }
+
 private:
 
     void on_link_changed(uint, const(char)[], bool, bool)
