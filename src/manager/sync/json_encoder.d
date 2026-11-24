@@ -356,6 +356,10 @@ nothrow @nogc:
         import manager.system : node_id;
         import manager.sync.discovery : SyncDiscoveryModule, PeerRole, role_name;
 
+        const(ubyte)[] local_nonce = peer.local_nonce();
+        if (local_nonce.length != 16)
+            return -1;
+
         begin_frame("hello");
         _buf.append(",\"ver\":", model_protocol_version);
 
@@ -365,7 +369,7 @@ nothrow @nogc:
 
         import urt.encoding : hex_encode;
         char[32] nonce = void;
-        hex_encode(peer.local_nonce(), nonce[]);
+        hex_encode(local_nonce, nonce[]);
         _buf.append(",\"nonce\":\"", nonce[], '\"');
         PeerRole role = peer.claim ? PeerRole.authority : get_module!SyncDiscoveryModule.local_role;
         if (role != PeerRole.none)

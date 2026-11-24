@@ -184,8 +184,8 @@ nothrow @nogc:
             return;
 
         bool handover = !n.adopted;
-        if (handover && !_secret.length)
-            mint_fleet_key();
+        if (handover && !_secret.length && !mint_fleet_key())
+            return;
 
         if (issue_claim(p, node_id, now, handover ? _secret[] : null))
             log.info("claiming node ", hex_id(node_id)[], " ('", n.name, "') over its session", handover ? " (adoption)" : "");
@@ -603,18 +603,23 @@ private:
     // an authority writes it when it mints the fleet key at first adoption.
     // TODO: micros without a filesystem need an NVS backing for this and node.id.
 
-    void mint_fleet_key()
+    bool mint_fleet_key()
     {
         import urt.crypto.random : crypto_random_bytes;
         import urt.encoding : hex_encode;
 
         ubyte[32] key = void;
-        crypto_random_bytes(key);
+        if (crypto_random_bytes(key).failed)
+        {
+            log.error("secure random source unavailable");
+            return false;
+        }
         char[64] hex = void;
         hex_encode(key[], hex[]);
         _secret = hex[].make_string();
         save_allegiance();
         log.notice("minted the fleet key for cluster '", _cluster, "'");
+        return true;
     }
 
     void load_allegiance()

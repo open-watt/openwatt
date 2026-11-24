@@ -896,7 +896,12 @@ package:
         if (!_local_nonce_set)
         {
             import urt.crypto.random : crypto_random_bytes;
-            crypto_random_bytes(_local_nonce);
+            if (crypto_random_bytes(_local_nonce).failed)
+            {
+                _send_failed = true;
+                log.error("secure random source unavailable");
+                return null;
+            }
             _local_nonce_set = true;
         }
         return _local_nonce[];
@@ -2266,4 +2271,31 @@ unittest
         near.on_rdp_event(wire.a, wire.addr_b, RDPEvent.closed);
         assert(!near.running);
     }
+}
+
+unittest
+{
+    import urt.crypto.random : crypto_random_override;
+    import urt.result : InternalResult, Result;
+
+    SyncPeer peer = alloc!SyncPeer(CID(77));
+    scope(exit) free(peer);
+    crypto_random_override = (ubyte[] bytes) nothrow @nogc
+    {
+        return InternalResult.failed;
+    };
+    scope(exit) crypto_random_override = null;
+    assert(peer.local_nonce().empty && !peer._local_nonce_set && peer._send_failed);
+    peer._send_failed = false;
+    crypto_random_override = (ubyte[] bytes) nothrow @nogc
+    {
+        bytes[] = 0x11;
+        return Result.success;
+    };
+    assert(peer.local_nonce().length == 16 && peer._local_nonce_set && !peer._send_failed);
+    crypto_random_override = (ubyte[] bytes) nothrow @nogc
+    {
+        return InternalResult.failed;
+    };
+    assert(peer.local_nonce()[0] == 0x11 && !peer._send_failed);
 }

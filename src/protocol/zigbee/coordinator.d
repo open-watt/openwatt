@@ -423,19 +423,12 @@ private:
         {
             log.info("network init failed: ", status);
 
-            // TODO: better keygen?
-            // TODO: also, allow user to supply one
+            import urt.crypto.random : crypto_random_bytes;
             import urt.rand;
-            debug
+            if (crypto_random_bytes(_network_key).failed)
             {
-                _network_key = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ];
-            }
-            else
-            {
-                (cast(uint[])_network_key)[0] = rand();
-                (cast(uint[])_network_key)[1] = rand();
-                (cast(uint[])_network_key)[2] = rand();
-                (cast(uint[])_network_key)[3] = rand();
+                log.error("cannot form network: secure random source unavailable");
+                return false;
             }
 
             // configure the security state...

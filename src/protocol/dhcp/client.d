@@ -4,7 +4,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem.temp : tconcat;
-import urt.rand;
+import urt.crypto.random : crypto_random_bytes;
 import urt.string;
 import urt.time;
 
@@ -105,8 +105,8 @@ protected:
             _subscribed = true;
         }
 
-        if (_phase == Phase.init_)
-            begin_exchange(Phase.selecting);
+        if (_phase == Phase.init_ && !begin_exchange(Phase.selecting))
+            return CompletionStatus.error;
 
         return _phase == Phase.bound ? CompletionStatus.complete : CompletionStatus.continue_;
     }
@@ -196,22 +196,29 @@ private:
     }
 
     // A REQUEST answering an OFFER continues the DISCOVER's exchange (RFC 2131 4.4.1); every other phase is a new one
-    void begin_exchange(Phase phase)
+    bool begin_exchange(Phase phase)
     {
         MonoTime now = getTime();
-        _phase = phase;
-        _retry_count = 0;
+        uint xid = _xid;
         if (phase != Phase.requesting)
         {
-            _xid = rand();
+            if (crypto_random_bytes((cast(ubyte*)&xid)[0 .. xid.sizeof]).failed)
+            {
+                log.error("secure random source unavailable");
+                return false;
+            }
             _request_started = now;
         }
+        _phase = phase;
+        _xid = xid;
+        _retry_count = 0;
         if (phase == Phase.selecting)
         {
             _address = IPAddr.any;
             _server_id = IPAddr.any;
         }
         arm_retransmit(now);
+        return true;
     }
 
     void arm_retransmit(MonoTime when)
@@ -236,7 +243,8 @@ private:
                 if (_retry_count >= max_retries)
                 {
                     log.warning("no response after ", _retry_count, _phase == Phase.selecting ? " DISCOVER" : " REQUEST", " attempts; restarting");
-                    begin_exchange(Phase.selecting);
+                    if (!begin_exchange(Phase.selecting))
+                        restart();
                     return;
                 }
                 if (_phase == Phase.selecting)
@@ -264,13 +272,18 @@ private:
         }
     }
 
-    void arm_lease_timer()
+    void arm_lease_timer(MonoTime retry_at = MonoTime(ulong.max))
     {
-        MonoTime next = _lease_deadline;
-        if (_phase == Phase.bound && _t1_deadline < next)
-            next = _t1_deadline;
-        else if (_phase == Phase.renewing && _t2_deadline < next)
-            next = _t2_deadline;
+        MonoTime next = retry_at;
+        if (next == MonoTime(ulong.max))
+        {
+            if (_phase == Phase.bound)
+                next = _t1_deadline;
+            else if (_phase == Phase.renewing)
+                next = _t2_deadline;
+        }
+        if (_lease_deadline < next)
+            next = _lease_deadline;
 
         if (_lease_timer_armed)
             g_app.cancel(&lease_timer);
@@ -287,11 +300,13 @@ private:
             abandon(tconcat("lease ", _address, " expired without renewal"));
             return;
         }
-        if (_phase == Phase.bound && now >= _t1_deadline)
-            begin_exchange(Phase.renewing);
-        else if (_phase == Phase.renewing && now >= _t2_deadline)
-            begin_exchange(Phase.rebinding);
-
+        Phase next = now >= _t2_deadline ? Phase.rebinding : Phase.renewing;
+        if ((_phase == Phase.bound && now >= _t1_deadline || _phase == Phase.renewing && now >= _t2_deadline) &&
+            !begin_exchange(next))
+        {
+            arm_lease_timer(now + 1.seconds);
+            return;
+        }
         arm_lease_timer();
     }
 
@@ -431,7 +446,13 @@ private:
         // RFC 2131 4.4.4: RELEASE is unicast to the server with ciaddr set.
         // TODO: ARP-resolve _server_id MAC; for now broadcast at L2 (same shortcut as renew).
         DhcpBuild b;
-        b.start(BootpRequest, station.mac, rand(), 0, false);
+        uint xid;
+        if (crypto_random_bytes((cast(ubyte*)&xid)[0 .. xid.sizeof]).failed)
+        {
+            log.error("secure random source unavailable");
+            return;
+        }
+        b.start(BootpRequest, station.mac, xid, 0, false);
         b.set_ciaddr(_address);
         b.add_message_type(DhcpMessageType.release);
         b.add_client_identifier(station.mac);
@@ -649,6 +670,25 @@ private:
 
 unittest
 {
+    {
+        import urt.crypto.random : crypto_random_override;
+        import urt.mem : alloc, free;
+        import urt.result : InternalResult;
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            return InternalResult.failed;
+        };
+        scope(exit) crypto_random_override = null;
+        DHCPClient client = alloc!DHCPClient(CID(77));
+        scope(exit) free(client);
+        client._phase = DHCPClient.Phase.bound;
+        client._xid = 0x1234;
+        assert(!client.begin_exchange(DHCPClient.Phase.renewing));
+        assert(client._phase == DHCPClient.Phase.bound && client._xid == 0x1234 && !client._retransmit_armed);
+        assert(!client.begin_exchange(DHCPClient.Phase.rebinding));
+        assert(client._phase == DHCPClient.Phase.bound && client._xid == 0x1234 && !client._retransmit_armed);
+    }
+
     Duration t1, t2;
 
     // both absent: the RFC defaults

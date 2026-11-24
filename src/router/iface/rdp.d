@@ -34,7 +34,7 @@ import urt.inet;
 import urt.lifetime : move;
 import urt.log;
 import urt.mem;
-import urt.rand : rand;
+import urt.crypto.random : crypto_random_bytes;
 import urt.time;
 
 import manager;
@@ -224,8 +224,7 @@ private:
         if (!s)
             return false;
         _connected = true;
-        s.start_open(now_time());
-        return true;
+        return s.start_open(now_time());
     }
 
     void on_datagram(UDPEndpoint*, const(void)[] data, ref UDPReceiveInfo info)
@@ -259,15 +258,15 @@ private:
     {
         if (RDPSession* s = find(peer))
         {
-            if (s._phase == RDPSession.Phase.closed)
-                s.start_open(now_time());
+            if (s._phase == RDPSession.Phase.closed && !s.start_open(now_time()))
+                return null;
             return s;
         }
         if (_connected)
             return null;
         RDPSession* s = add(peer);
-        if (s)
-            s.start_open(now_time());
+        if (s && !s.start_open(now_time()))
+            return null;
         return s;
     }
 
@@ -514,6 +513,7 @@ nothrow @nogc:
     enum Phase : ubyte
     {
         closed,
+        entropy,
         opening,
         established,
     }
@@ -610,10 +610,16 @@ nothrow @nogc:
     uint in_flight() const pure
         => cast(ushort)(_tx_next - _tx_una);
 
-    void begin()
+    bool begin()
     {
-        _nonce = cast(ubyte)rand();
-        _isn = cast(ubyte)(rand() & 31);
+        ubyte[2] random = void;
+        if (crypto_random_bytes(random).failed)
+        {
+            log.error("secure random source unavailable");
+            return false;
+        }
+        _nonce = random[0];
+        _isn = random[1] & 31;
         _tx_una = _tx_next = cast(ushort)(_isn + 1);
         _tx_lane[] = 0;
         _unacked[] = 0;
@@ -624,13 +630,16 @@ nothrow @nogc:
         _backoff = 0;
         _open_tries = 0;
         _phase = Phase.opening;
+        return true;
     }
 
-    void start_open(MonoTime now)
+    bool start_open(MonoTime now)
     {
-        begin();
+        if (!begin())
+            return false;
         send_open(now);
         rearm(now);
+        return true;
     }
 
     // messages complete with reason; queue and window are swapped out first, as a callback may send again
@@ -1107,7 +1116,7 @@ nothrow @nogc:
     void rearm(MonoTime now)
     {
         MonoTime next = _ack_deadline;
-        if (_phase == Phase.opening && (next == MonoTime.init || _open_deadline < next))
+        if ((_phase == Phase.opening || _phase == Phase.entropy) && (next == MonoTime.init || _open_deadline < next))
             next = _open_deadline;
         if (Frame* f = oldest_frame())
         {
@@ -1154,6 +1163,13 @@ nothrow @nogc:
     {
         if (_phase == Phase.closed)
             return;
+        if (_phase == Phase.entropy)
+        {
+            if (now >= _open_deadline && !start_open(now))
+                _open_deadline = now + initial_rto_us.usecs;
+            rearm(now);
+            return;
+        }
         if (_writable_due)
         {
             _writable_due = false;
@@ -1269,7 +1285,8 @@ nothrow @nogc:
         {
             if (is_ack)
                 return;
-            begin();
+            if (!begin())
+                return;
         }
         establish(isn, nonce, peer_max, now);
         // the established handler may have refused the session
@@ -1302,8 +1319,12 @@ nothrow @nogc:
         _phase = Phase.closed;
         teardown(MessageState.failed);
         _ep.event(_peer, RDPEvent.closed);
-        if (_ep._connected && _phase == Phase.closed && !_ep._closing)
-            start_open(now);
+        if (_ep._connected && _phase == Phase.closed && !_ep._closing && !start_open(now))
+        {
+            _phase = Phase.entropy;
+            _open_deadline = now + initial_rto_us.usecs;
+            rearm(now);
+        }
     }
 
     // a handler may retire the session mid-delivery: what it reads stays until delivery unwinds, and the
@@ -1518,6 +1539,45 @@ nothrow @nogc:
 unittest
 {
     import urt.mem.page : page_free_generation;
+
+    {
+        import urt.crypto.random : crypto_random_override;
+        import urt.result : InternalResult, Result;
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            return InternalResult.failed;
+        };
+        scope(exit) crypto_random_override = null;
+        RDPSession rejected;
+        assert(!rejected.start_open(MonoTime()) && rejected._phase == RDPSession.Phase.closed);
+
+        RDPEndpoint endpoint;
+        endpoint._connected = true;
+        static struct Counter
+        {
+            uint sent;
+            void transmit(RDPEndpoint*, const(ubyte)[], ref const InetAddress) nothrow @nogc
+            {
+                ++sent;
+            }
+        }
+        Counter counter;
+        endpoint._test_wire = &counter.transmit;
+        rejected._ep = &endpoint;
+        MonoTime now = MonoTime(1_000_000_000);
+        rejected.fail_session(now, false);
+        assert(rejected._phase == RDPSession.Phase.entropy && rejected._timer_armed && counter.sent == 0);
+        MonoTime due = rejected._open_deadline;
+        rejected.tick(due - 1.usecs);
+        assert(counter.sent == 0);
+        crypto_random_override = (ubyte[] bytes) nothrow @nogc
+        {
+            bytes[] = 0x3F;
+            return Result.success;
+        };
+        rejected.tick(due);
+        assert(rejected._phase == RDPSession.Phase.opening && counter.sent == 1);
+    }
 
     struct Wire
     {

@@ -365,13 +365,17 @@ nothrow @nogc:
         import manager.system : node_id;
         import manager.sync.discovery : PeerRole, SyncDiscoveryModule;
 
+        const(ubyte)[] local_nonce = peer.local_nonce();
+        if (local_nonce.length != 16)
+            return -1;
+
         begin_frame(Verb.hello);
         _buf.put_varint(model_protocol_version);
         _buf ~= local_sync_caps;
         _buf.put_varint(peer.local_max_message);
         _buf.put_varint(node_id());
         _buf ~= peer.claim ? PeerRole.authority : get_module!SyncDiscoveryModule.local_role;
-        _buf.put_str(cast(const(char)[])peer.local_nonce());
+        _buf.put_str(cast(const(char)[])local_nonce);
         _buf.put_varint(peer.local_segment);
         return send_frame(peer);
     }
