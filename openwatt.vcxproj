@@ -76,34 +76,36 @@
     <DCompile Include="src\apps\ota\package.d" />
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\driver\baremetal\ble.d" />
+    <DCompile Include="src\driver\baremetal\ethernet.d" />
+    <DCompile Include="src\driver\baremetal\sfp.d" />
     <DCompile Include="src\driver\baremetal\system.d" />
     <DCompile Include="src\driver\baremetal\watchdog.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
     <DCompile Include="src\driver\baremetal\wpan.d" />
+    <DCompile Include="src\driver\bl808\ipc_ids.d" />
+    <DCompile Include="src\driver\bl808\xram.d" />
     <DCompile Include="src\driver\ble.d" />
-    <DCompile Include="src\driver\can.d" />
     <DCompile Include="src\driver\boards\smartevse\binding.d" />
     <DCompile Include="src\driver\boards\smartevse\display.d" />
     <DCompile Include="src\driver\boards\smartevse\evse.d" />
     <DCompile Include="src\driver\boards\smartevse\hardware.d" />
     <DCompile Include="src\driver\boards\smartevse\package.d" />
     <DCompile Include="src\driver\boards\smartevse\pins.d" />
-    <DCompile Include="src\driver\font\render.d" />
-    <DCompile Include="src\driver\font\small.d" />
-    <DCompile Include="src\driver\power\hardware.d" />
-    <DCompile Include="src\driver\power\regulator.d" />
-    <DCompile Include="src\driver\rtc\pcf85063.d" />
-    <DCompile Include="src\driver\esp32\system.d" />
+    <DCompile Include="src\driver\can.d" />
+    <DCompile Include="src\driver\esp32\crash.d" />
     <DCompile Include="src\driver\esp32\idf_log_bridge.d" />
+    <DCompile Include="src\driver\esp32\system.d" />
     <DCompile Include="src\driver\esp32\watchdog.d" />
     <DCompile Include="src\driver\ethernet.d" />
+    <DCompile Include="src\driver\font\render.d" />
+    <DCompile Include="src\driver\font\small.d" />
     <DCompile Include="src\driver\linux\ble.d" />
+    <DCompile Include="src\driver\linux\bridge.d" />
     <DCompile Include="src\driver\linux\can.d" />
     <DCompile Include="src\driver\linux\ctrl_iface.d" />
     <DCompile Include="src\driver\linux\ethernet.d" />
     <DCompile Include="src\driver\linux\fdwatch.d" />
     <DCompile Include="src\driver\linux\hostapd.d" />
-    <DCompile Include="src\driver\linux\bridge.d" />
     <DCompile Include="src\driver\linux\netlink.d" />
     <DCompile Include="src\driver\linux\netlink_dump.d" />
     <DCompile Include="src\driver\linux\netlink_write.d" />
@@ -116,10 +118,13 @@
     <DCompile Include="src\driver\linux\system.d" />
     <DCompile Include="src\driver\linux\wifi.d" />
     <DCompile Include="src\driver\linux\wpa_supplicant.d" />
+    <DCompile Include="src\driver\power\hardware.d" />
+    <DCompile Include="src\driver\power\regulator.d" />
+    <DCompile Include="src\driver\rtc\pcf85063.d" />
+    <DCompile Include="src\driver\sfp.d" />
     <DCompile Include="src\driver\system.d" />
     <DCompile Include="src\driver\watchdog.d" />
     <DCompile Include="src\driver\wifi.d" />
-    <DCompile Include="src\driver\wpan.d" />
     <DCompile Include="src\driver\windows\adapter_watcher.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />
     <DCompile Include="src\driver\windows\iphlpapi.d" />
@@ -128,15 +133,15 @@
     <DCompile Include="src\driver\windows\system.d" />
     <DCompile Include="src\driver\windows\wifi.d" />
     <DCompile Include="src\driver\windows\wlanapi.d" />
+    <DCompile Include="src\driver\wpan.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
     <DCompile Include="src\manager\binding.d" />
     <DCompile Include="src\manager\bootguard.d" />
-    <DCompile Include="src\manager\object_signal.d" />
-    <DCompile Include="src\manager\sample\codec.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
+    <DCompile Include="src\manager\config_revision.d" />
     <DCompile Include="src\manager\console\argument.d" />
     <DCompile Include="src\manager\console\bitmap.d" />
     <DCompile Include="src\manager\console\builtin_commands.d" />
@@ -153,24 +158,28 @@
     <DCompile Include="src\manager\cron.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
-    <DCompile Include="src\manager\series.d" />
     <DCompile Include="src\manager\expression.d" />
     <DCompile Include="src\manager\features.d" />
     <DCompile Include="src\manager\id.d" />
     <DCompile Include="src\manager\log.d" />
+    <DCompile Include="src\manager\object_signal.d" />
     <DCompile Include="src\manager\ows.d" />
     <DCompile Include="src\manager\package.d" />
+    <DCompile Include="src\manager\panel.d" />
     <DCompile Include="src\manager\path.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\reactor.d" />
     <DCompile Include="src\manager\record.d" />
+    <DCompile Include="src\manager\sample\codec.d" />
     <DCompile Include="src\manager\sample\package.d" />
-    <DCompile Include="src\manager\config_revision.d" />
+    <DCompile Include="src\manager\sample\spec.d" />
+    <DCompile Include="src\manager\sample\wire.d" />
     <DCompile Include="src\manager\saved_config.d" />
     <DCompile Include="src\manager\secret.d" />
+    <DCompile Include="src\manager\series.d" />
     <DCompile Include="src\manager\signal.d" />
-    <DCompile Include="src\manager\sample\spec.d" />
+    <DCompile Include="src\manager\stats.d" />
     <DCompile Include="src\manager\sync\binary_encoder.d" />
     <DCompile Include="src\manager\sync\console.d" />
     <DCompile Include="src\manager\sync\discovery.d" />
@@ -185,7 +194,6 @@
     <DCompile Include="src\manager\syslog.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
-    <DCompile Include="src\manager\sample\wire.d" />
     <DCompile Include="src\protocol\ble\att.d" />
     <DCompile Include="src\protocol\ble\binding.d" />
     <DCompile Include="src\protocol\ble\client.d" />
@@ -221,10 +229,10 @@
     <DCompile Include="src\protocol\gpio\package.d" />
     <DCompile Include="src\protocol\http\binding.d" />
     <DCompile Include="src\protocol\http\client.d" />
+    <DCompile Include="src\protocol\http\fileserver.d" />
     <DCompile Include="src\protocol\http\message.d" />
     <DCompile Include="src\protocol\http\package.d" />
     <DCompile Include="src\protocol\http\server.d" />
-    <DCompile Include="src\protocol\http\fileserver.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />
@@ -233,6 +241,7 @@
     <DCompile Include="src\protocol\ip\icmp.d" />
     <DCompile Include="src\protocol\ip\icmp6.d" />
     <DCompile Include="src\protocol\ip\igmp.d" />
+    <DCompile Include="src\protocol\ip\linux_mirror.d" />
     <DCompile Include="src\protocol\ip\mld.d" />
     <DCompile Include="src\protocol\ip\nd.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
@@ -241,7 +250,6 @@
     <DCompile Include="src\protocol\ip\ra.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
-    <DCompile Include="src\protocol\ip\linux_mirror.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
     <DCompile Include="src\protocol\ip\tcp.d" />
     <DCompile Include="src\protocol\ip\tcp_stream.d" />
@@ -290,9 +298,9 @@
     <DCompile Include="src\protocol\tesla\twc.d" />
     <DCompile Include="src\protocol\tesla\vehicle_codec.d" />
     <DCompile Include="src\protocol\tesla\vehicle_crypto.d" />
+    <DCompile Include="src\protocol\tesla\vehicle_retry.d" />
     <DCompile Include="src\protocol\tesla\vehicle_scanner.d" />
     <DCompile Include="src\protocol\tesla\vehicle_session.d" />
-    <DCompile Include="src\protocol\tesla\vehicle_retry.d" />
     <DCompile Include="src\protocol\tls\certificate.d" />
     <DCompile Include="src\protocol\tls\package.d" />
     <DCompile Include="src\protocol\tls\stream.d" />
@@ -310,12 +318,15 @@
     <DCompile Include="src\router\iface\checksum.d" />
     <DCompile Include="src\router\iface\endpoint.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
-    <DCompile Include="src\router\iface\i2c.d" />
     <DCompile Include="src\router\iface\group.d" />
+    <DCompile Include="src\router\iface\i2c.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\priority_queue.d" />
+    <DCompile Include="src\router\iface\rdp.d" />
+    <DCompile Include="src\router\iface\sff8472.d" />
+    <DCompile Include="src\router\iface\sfp.d" />
     <DCompile Include="src\router\iface\udp.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\wifi.d" />
@@ -334,6 +345,8 @@
     <DCompile Include="src\router\stream\usb_serial.d" />
     <DCompile Include="src\tools\protobuf\package.d" />
     <DCompile Include="src\tools\protobuf\parse.d" />
+    <DCompile Include="third_party\urt\config\urt_config.d" />
+    <DCompile Include="third_party\urt\src\core\atomic.d" />
     <DCompile Include="third_party\urt\src\object.d" />
     <DCompile Include="third_party\urt\src\std\math.d" />
     <DCompile Include="third_party\urt\src\urt\algorithm.d" />
@@ -341,6 +354,7 @@
     <DCompile Include="third_party\urt\src\urt\async.d" />
     <DCompile Include="third_party\urt\src\urt\atomic.d" />
     <DCompile Include="third_party\urt\src\urt\attribute.d" />
+    <DCompile Include="third_party\urt\src\urt\build.d" />
     <DCompile Include="third_party\urt\src\urt\compiler.d" />
     <DCompile Include="third_party\urt\src\urt\conv.d" />
     <DCompile Include="third_party\urt\src\urt\crc.d" />
@@ -357,950 +371,435 @@
     <DCompile Include="third_party\urt\src\urt\digest\hmac.d" />
     <DCompile Include="third_party\urt\src\urt\digest\md5.d" />
     <DCompile Include="third_party\urt\src\urt\digest\sha.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\ble.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\can.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\dot1x\eapol.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\freertos\fibre.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\gpio.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\irq.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\timer.d" />
     <DCompile Include="third_party\urt\src\urt\driver\adc.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\counter.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\event.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\i2c.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\nvs.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\pwm.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\spi.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\uart.d" />
-    <DCompile Include="third_party\urt\src\urt\fs\littlefs.d" />
-    <DCompile Include="third_party\urt\src\urt\fs\spiffs.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wifi.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpan.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\authenticator.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\package.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\supplicant.d" />
-    <DCompile Include="third_party\urt\src\urt\driver\baremetal\exception.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\baremetal\exception.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\baremetal\heap.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\alloc.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\gpio.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\alloc.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\package.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\syscalls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\heap.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\identity.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\irq.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\package.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\pbuf.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\trng.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\wifi.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\sdk_stubs.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\syscalls.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\gpio.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\timer.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\trng.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\wifi.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\package.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\syscalls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\trng.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\led.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\i2c.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\clock.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808\ipc.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\pwm.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\package.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\reset.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\spi.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\watchdog.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\syscalls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\identity.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\system.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\ws2812.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808\xram.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\i2c.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\irq.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\package.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\spi.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\syscalls.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\timer.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\bl_ops.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\event.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\flash.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_lmac.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_pm.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_wpa.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\heap.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\identity.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\system.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\trng.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\uart.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\ble.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\can.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\cortex_m\fault.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\cortex_m\nvic.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\counter.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\debugger.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\dot1x\eapol.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\adc.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\alloc.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\ble.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\can.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\gpio.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\counter.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\ethernet.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\event.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\exception.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\i2c.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\idf_log.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\nvs.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\pwm.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\spi.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\wifi.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\wpan.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\posix\gpio.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    <DCompile Include="third_party\urt\src\urt\driver\ethernet.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\event.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\event_core.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\freertos\fibre.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\gpio.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\i2c.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\irq.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\cache.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\ethernet.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\event.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\fault.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\heap.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\i2c.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\irq.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\netcon.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\package.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\spi_nor.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\syscalls.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\timer.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\uart.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\watchdog.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\nvs.d" />
     <DCompile Include="third_party\urt\src\urt\driver\posix\alloc.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\crash_handler.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\posix\exception.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\uart.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\pwm.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\reset.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\riscv\clint.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\riscv\csr.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\routerboot.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\bootrom.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\event.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\heap.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\identity.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\package.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\pwm.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\syscalls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\trng.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\rp2350\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\watchdog.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\ws2812.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\soft_pwm.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\spi.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\event.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\gpio.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\heap.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\identity.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\irq.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\package.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\pwm.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\syscalls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\timer.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\trng.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\stm32\uart.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\watchdog.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\timer.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\uart.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\uart_core.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\wifi.d" />
     <DCompile Include="third_party\urt\src\urt\driver\windows\alloc.d" />
     <DCompile Include="third_party\urt\src\urt\driver\windows\ble.d" />
     <DCompile Include="third_party\urt\src\urt\driver\windows\exception.d" />
     <DCompile Include="third_party\urt\src\urt\driver\windows\fibre.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\windows\uart.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\authenticator.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\package.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\supplicant.d">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpan.d" />
+    <DCompile Include="third_party\urt\src\urt\driver\ws2812.d" />
     <DCompile Include="third_party\urt\src\urt\encoding.d" />
     <DCompile Include="third_party\urt\src\urt\endian.d" />
     <DCompile Include="third_party\urt\src\urt\exception.d" />
     <DCompile Include="third_party\urt\src\urt\fibre.d" />
     <DCompile Include="third_party\urt\src\urt\file.d" />
     <DCompile Include="third_party\urt\src\urt\format\json.d" />
+    <DCompile Include="third_party\urt\src\urt\format\xml.d" />
+    <DCompile Include="third_party\urt\src\urt\fs\littlefs.d" />
+    <DCompile Include="third_party\urt\src\urt\fs\spiffs.d" />
     <DCompile Include="third_party\urt\src\urt\hash.d" />
     <DCompile Include="third_party\urt\src\urt\inet.d" />
     <DCompile Include="third_party\urt\src\urt\internal\aa.d" />
     <DCompile Include="third_party\urt\src\urt\internal\bitop.d" />
-    <DCompile Include="third_party\urt\src\urt\internal\exception.d" />
     <DCompile Include="third_party\urt\src\urt\internal\dwarfeh.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\exception.d" />
     <DCompile Include="third_party\urt\src\urt\internal\lifetime.d" />
-    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\package.d" />
-    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\termios.d" />
-    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\mbedtls.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-      <FileType>CppCode</FileType>
+      <ExcludedFromBuild>true</ExcludedFromBuild>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\os.c" />
+    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\noeh.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\os.c">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\errno.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdio.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdlib.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\freertos\package.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\package.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\termios.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetyps.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntdef.d" />
@@ -1332,19 +831,21 @@
     <DCompile Include="third_party\urt\src\urt\map.d" />
     <DCompile Include="third_party\urt\src\urt\math.d" />
     <DCompile Include="third_party\urt\src\urt\mem\alloc.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\allocator.d" />
     <DCompile Include="third_party\urt\src\urt\mem\bitmap.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\freelist.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\package.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\page.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\pagepool.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\pagepool_tiny.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\pressure.d" />
     <DCompile Include="third_party\urt\src\urt\mem\profile\common.d" />
     <DCompile Include="third_party\urt\src\urt\mem\profile\log.d" />
     <DCompile Include="third_party\urt\src\urt\mem\profile\package.d" />
     <DCompile Include="third_party\urt\src\urt\mem\profile\record.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\freelist.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\package.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\reclaim.d" />
     <DCompile Include="third_party\urt\src\urt\mem\refman.d" />
     <DCompile Include="third_party\urt\src\urt\mem\region.d" />
     <DCompile Include="third_party\urt\src\urt\mem\ring.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d" />
-    <DCompile Include="third_party\urt\src\urt\mem\string.d" />
     <DCompile Include="third_party\urt\src\urt\mem\temp.d" />
     <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d" />
     <DCompile Include="third_party\urt\src\urt\meta\nullable.d" />
@@ -1382,30 +883,17 @@
     <DCompile Include="third_party\urt\src\urt\thread.d" />
     <DCompile Include="third_party\urt\src\urt\time.d" />
     <DCompile Include="third_party\urt\src\urt\traits.d" />
+    <DCompile Include="third_party\urt\src\urt\typeops.d" />
+    <DCompile Include="third_party\urt\src\urt\typereg.d" />
     <DCompile Include="third_party\urt\src\urt\util.d" />
     <DCompile Include="third_party\urt\src\urt\uuid.d" />
-    <DCompile Include="third_party\urt\src\urt\typereg.d" />
     <DCompile Include="third_party\urt\src\urt\variant.d" />
     <DCompile Include="third_party\urt\src\urt\zip.d" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
     <None Include=".gitignore" />
-    <None Include="conf\goodwe_profiles\gwxx48es.conf" />
-    <None Include="conf\ha_profiles\emporia.conf" />
-    <None Include="conf\modbus_profiles\eastron_sdm120.conf" />
-    <None Include="conf\modbus_profiles\eastron_sdm630.conf" />
-    <None Include="conf\modbus_profiles\gm1000.conf" />
-    <None Include="conf\modbus_profiles\goodwe_ems.conf" />
-    <None Include="conf\modbus_profiles\pace_bms.conf" />
-    <None Include="conf\modbus_profiles\se_meter.conf" />
-    <None Include="conf\modbus_profiles\shelly.conf" />
-    <None Include="conf\modbus_profiles\smartevse.conf" />
-    <None Include="conf\modbus_profiles\tac1100.conf" />
-    <None Include="conf\mqtt_profiles\open_beken.conf" />
-    <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
-    <None Include="conf\zigbee_profiles\zigbee.conf" />
     <None Include="docs\CLI.md" />
     <None Include="docs\COMPONENT_TEMPLATES.md" />
     <None Include="docs\FEATURES.md" />
@@ -1442,35 +930,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
     </None>
-    <None Include="third_party\urt\src\urt\driver\bl808\start.S">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </None>
     <None Include="third_party\urt\src\urt\driver\bl808_m0\start.S">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\rp2350\boot2.S">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
@@ -1537,35 +997,7 @@
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\vlan.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="third_party\urt\src\urt\driver\bl808\hbn_ram.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </ClCompile>
     <ClCompile Include="third_party\urt\src\urt\driver\esp32\main.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="third_party\urt\src\urt\driver\esp32\ow_shim.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
@@ -1800,7 +1232,7 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
@@ -1809,7 +1241,7 @@
       <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions;AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1829,7 +1261,7 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
@@ -1840,7 +1272,7 @@
       <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1864,16 +1296,17 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off -check=assert=on %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1896,7 +1329,7 @@
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
@@ -1905,7 +1338,7 @@
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>UseInternalIPStack;AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions;UseInternalIPStack;AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1926,7 +1359,7 @@
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
@@ -1936,7 +1369,7 @@
       <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1960,16 +1393,17 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>third_party/dmd/;src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields -check=invariant=off %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-preview=bitfields -check=invariant=off -check=assert=on %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1991,15 +1425,15 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all --fno-moduleinfo --fno-rtti %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions;AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -2019,17 +1453,17 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -2053,7 +1487,7 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
@@ -2061,8 +1495,9 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all --enable-asserts --fno-moduleinfo --fno-rtti -O3 %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -2084,15 +1519,15 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all --fno-moduleinfo --fno-rtti %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions;AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -2112,17 +1547,17 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -2146,7 +1581,7 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
-      <ImportPaths>src/;third_party/urt/src/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
+      <ImportPaths>src/;third_party/urt/src/;third_party/urt/config/;third_party/npcap-sdk-1.15/Include/</ImportPaths>
       <StringImportPaths>src/</StringImportPaths>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
       <PreviewIn>true</PreviewIn>
@@ -2154,8 +1589,9 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields --enable-invariants=false --fno-exceptions -frame-pointer=all --enable-asserts --fno-moduleinfo --fno-rtti -O3 %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>HasRDP;HasSFP;NoExceptions</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
