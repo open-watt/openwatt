@@ -234,7 +234,9 @@ nothrow @nogc:
     abstract void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq);
 
     abstract void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag);
-    abstract bool encode_log(SyncPeer peer, const(char)[] line);
+    // true consumes the line, including a permanent size loss; false retains it for retry.
+    // A loss notice is retained if it cannot fit; it must not count itself as a loss.
+    abstract bool encode_log(SyncPeer peer, const(char)[] line, bool loss_notice = false);
 
     // Time sync (clock discipline over the channel)
     //
@@ -314,13 +316,8 @@ nothrow @nogc:
     // (or create) call followed by zero or more set calls, one per prop.
     //
     // No intermediate SyncMessage / SyncEvent struct. No PropReader.
-    //
-    // Returns false only when the frame cites state that hasn't arrived yet
-    // (a val racing its add); an armed sublayer withholds the ack so the
-    // sender's catch-up resupplies it. Malformed frames return true: they
-    // will never become applicable.
 
-    abstract bool decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame);
+    abstract void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame);
 
     // Per-peer per-tick property flush
     //

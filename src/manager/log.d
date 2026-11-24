@@ -296,10 +296,19 @@ nothrow @nogc:
     uint lost(LogConsumerHandle handle) const
         => handle.valid && _consumers[handle.index].active ? _consumers[handle.index].lost : 0;
 
-    void clear_lost(LogConsumerHandle handle)
+    void record_lost(LogConsumerHandle handle)
+    {
+        if (handle.valid && _consumers[handle.index].active)
+            ++_consumers[handle.index].lost;
+    }
+
+    void clear_lost(LogConsumerHandle handle, uint count = uint.max)
     {
         if (handle.valid)
-            _consumers[handle.index].lost = 0;
+        {
+            ref lost = _consumers[handle.index].lost;
+            lost = lost > count ? lost - count : 0;
+        }
     }
 
     void acknowledge(LogConsumerHandle handle)
@@ -1353,6 +1362,14 @@ unittest
     assert(delivered.message == "queued");
     module_.acknowledge(second);
     assert(module_._delivery_count == 0);
+    module_.record_lost(first);
+    assert(module_.lost(first) == 1 && module_.lost(second) == 0);
+    uint reported = module_.lost(first);
+    module_.record_lost(first);
+    module_.clear_lost(first, reported);
+    assert(module_.lost(first) == 1, "losses added during reporting must remain pending");
+    module_.clear_lost(first);
+    assert(module_.lost(first) == 0);
 
     queued.message = "release";
     module_.enqueue(queued);

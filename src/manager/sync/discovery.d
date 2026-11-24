@@ -20,10 +20,11 @@ import manager.console;
 import manager.features;
 import manager.plugin;
 import manager.sync.udp_bind;
-import manager.sync.udp_server;
+static if (has_rdp)
+    import manager.sync.udp_server;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo;
+import router.iface.endpoint : UDPEndpoint, UDPReceiveInfo, udp_open;
 import router.iface.ethernet;
 import router.iface.mac;
 
@@ -142,11 +143,19 @@ nothrow @nogc:
 
 final class UDPDiscovery : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("bind", bind),
-                                 Prop!("interface", interfaces),
-                                 Prop!("port", port),
-                                 Prop!("multicast", multicast),
-                                 Prop!("interval", interval));
+    version (HasRDP)
+        alias Properties = AliasSeq!(Prop!("bind", bind),
+                                     Prop!("interface", interfaces),
+                                     Prop!("port", port),
+                                     Prop!("sync-port", sync_port),
+                                     Prop!("multicast", multicast),
+                                     Prop!("interval", interval));
+    else
+        alias Properties = AliasSeq!(Prop!("bind", bind),
+                                     Prop!("interface", interfaces),
+                                     Prop!("port", port),
+                                     Prop!("multicast", multicast),
+                                     Prop!("interval", interval));
 nothrow @nogc:
 
     ~this() {}
@@ -189,6 +198,20 @@ nothrow @nogc:
         restart();
     }
 
+    version (HasRDP)
+    {
+        final ushort sync_port() const pure
+            => _sync_port;
+        final void sync_port(ushort value)
+        {
+            if (_sync_port == value)
+                return;
+            _sync_port = value;
+            mark_set!(typeof(this), "sync-port")();
+            restart();
+        }
+    }
+
     final bool multicast() const pure
         => _multicast;
     final void multicast(bool value)
@@ -217,7 +240,17 @@ protected:
         bool source = _interfaces.length != 0;
         foreach (ref address; _bind[])
             source = source || supports_family(address.family);
-        return source && _port != 0 && _interval > Duration.zero;
+        if (!source || _port == 0 || _interval <= Duration.zero)
+            return false;
+        static if (has_rdp)
+        {
+            if (_sync_port == 0 || _sync_port == _port)
+                return false;
+            foreach (ref address; _bind[])
+                if (address.port == _sync_port)
+                    return false;
+        }
+        return true;
     }
 
     override CompletionStatus startup()
@@ -248,8 +281,7 @@ protected:
             restart();
             return;
         }
-        if (ensure_server())
-            _server.accepting(get_module!SyncDiscoveryModule.local_role == PeerRole.authority);
+        ensure_server();
         if (getTime() >= _next_announce)
             send_announce();
     }
@@ -261,8 +293,12 @@ private:
     Array!InetAddress _bind;
     Array!(ObjectRef!BaseInterface) _interfaces;
     Array!UDPBindEndpoint _multicast_bindings;
-    UDPEndpointSet _endpoint_set;
-    UDPSyncServer _server;
+    EndpointSet _endpoint_set;
+    static if (has_rdp)
+    {
+        UDPSyncServer _server;
+        ushort _sync_port = default_sync_port;
+    }
     bool _multicast = true;
     ushort _port = default_discovery_port;
     Duration _interval = 30.seconds;
@@ -292,16 +328,11 @@ private:
     void send_announce()
     {
         _next_announce = getTime() + _interval;
-        align(size_t.sizeof) ubyte[192] buf = void;
-        ubyte[] tlv = get_module!SyncDiscoveryModule.build_local_announce(buf);
-        if (!tlv)
-            return;
-
         foreach (ref endpoint; _endpoint_set.endpoints[])
         {
             if (endpoint.binding.local.family == AddressFamily.ether)
             {
-                endpoint.endpoint.sendto(tlv, InetAddress(MACAddress.broadcast.b, endpoint.binding.local.port));
+                announce(endpoint, endpoint.binding.local, InetAddress(MACAddress.broadcast.b, endpoint.binding.local.port));
                 continue;
             }
             static if (has_ip)
@@ -310,29 +341,49 @@ private:
                     continue;
                 if (_multicast)
                 {
-                    InetAddress destination = InetAddress(discovery_ipv4_group, endpoint.binding.local.port);
-                    foreach_multicast_local(endpoint.binding.local.port, (IPAddr local)
+                    ushort port = endpoint.binding.local.port;
+                    InetAddress destination = InetAddress(discovery_ipv4_group, port);
+                    foreach_multicast_local(port, (IPAddr local)
                     {
-                        if (local == IPAddr.any || endpoint.endpoint.outbound_interface(local))
-                            endpoint.endpoint.sendto(tlv, destination);
+                        if (local == IPAddr.any || endpoint.udp.outbound_interface(local))
+                            announce(endpoint, InetAddress(local, port), destination);
                     });
                     continue;
                 }
                 InetAddress destination = discovery_destination(endpoint.binding);
                 if (destination.family == AddressFamily.ipv4)
-                    endpoint.endpoint.sendto(tlv, destination);
+                    announce(endpoint, endpoint.binding.local, destination);
             }
         }
     }
 
-    bool refresh_endpoints()
+    // a beacon names the sync port only where this domain's listener serves its source address
+    void announce(ref BoundEndpoint endpoint, InetAddress source, InetAddress destination)
     {
-        UDPEndpointHooks hooks = endpoint_hooks();
-        return _endpoint_set.refresh(_bind[], _interfaces[], _port, hooks);
+        align(8) ubyte[192] buf = void;
+        ushort serving;
+        static if (has_rdp)
+            serving = _server ? _server.serving_port(source, endpoint.binding.iface.get) : 0;
+        if (ubyte[] tlv = get_module!SyncDiscoveryModule.build_local_announce(buf, serving))
+            endpoint.udp.sendto(tlv, destination);
     }
 
-    bool include_endpoint(ref const UDPBindEndpoint binding)
-        => supports_family(binding.local.family);
+    bool refresh_endpoints()
+    {
+        EndpointHooks hooks = endpoint_hooks();
+        return _endpoint_set.refresh(_bind[], _interfaces[], _port, hooks, &prepare_bindings);
+    }
+
+    bool prepare_bindings(ref Array!UDPBindEndpoint bindings)
+    {
+        static if (has_ip)
+            if (_multicast)
+                return prepare_multicast_bindings(bindings);
+        for (size_t i = bindings.length; i-- > 0; )
+            if (!supports_family(bindings[i].local.family))
+                bindings.removeSwapLast(i);
+        return false;
+    }
 
     static bool supports_family(AddressFamily family) pure
     {
@@ -342,6 +393,22 @@ private:
             return family == AddressFamily.ipv4;
         else
             return false;
+    }
+
+    bool open_endpoint(ref BoundEndpoint bound, EthernetStation station)
+    {
+        bound.udp = udp_open(&bound.binding.local, null, &on_datagram, station);
+        if (!bound.udp)
+            return false;
+        if (configure_endpoint(bound.udp, bound.binding))
+            return true;
+        bound.udp.close();
+        return false;
+    }
+
+    void close_endpoint(ref BoundEndpoint bound)
+    {
+        bound.udp.close();
     }
 
     bool configure_endpoint(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding)
@@ -462,87 +529,80 @@ private:
 
     void close_endpoints()
     {
-        UDPEndpointHooks hooks = endpoint_hooks();
+        EndpointHooks hooks = endpoint_hooks();
         _endpoint_set.close(hooks);
     }
 
-    UDPEndpointHooks endpoint_hooks()
-    {
-        static if (has_ip)
-            UDPBindingsPrepare prepare = _multicast ? &prepare_multicast_bindings : null;
-        else
-            UDPBindingsPrepare prepare;
-        return UDPEndpointHooks(prepare, &include_endpoint, &configure_endpoint, &remove_endpoint, &on_datagram);
-    }
-
-    void remove_endpoint(UDPEndpoint* endpoint)
-    {
-        if (_server)
-            _server.remove_endpoint(endpoint);
-    }
+    EndpointHooks endpoint_hooks()
+        => EndpointHooks(&open_endpoint, &close_endpoint);
 
     bool ensure_server()
     {
-        if (_server)
-            return true;
-        auto servers = Collection!UDPSyncServer();
-        const(char)[] server_name = servers.generate_name(tconcat(name[], "-sync"));
-        UDPSyncServer server = servers.create(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
-        if (!server)
+        static if (has_rdp)
         {
-            log.error("failed to create sync server for discovery domain '", name, "'");
-            return false;
+            if (!_server)
+            {
+                auto servers = Collection!UDPSyncServer();
+                const(char)[] server_name = servers.generate_name(tconcat(name[], "-sync"));
+                UDPSyncServer server = servers.create(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+                if (!server)
+                {
+                    log.error("failed to create sync server for discovery domain '", name, "'");
+                    return false;
+                }
+                server.configure_slave(_bind[], _interfaces[], _sync_port);
+                server.subscribe(&server_state_change);
+                _server = server;
+            }
+            _server.accepting(get_module!SyncDiscoveryModule.local_role == PeerRole.authority);
         }
-        server.configure_slave();
-        server.accepting(get_module!SyncDiscoveryModule.local_role == PeerRole.authority);
-        server.subscribe(&server_state_change);
-        _server = server;
         return true;
     }
 
     void close_server()
     {
-        if (!_server)
-            return;
-        UDPSyncServer server = _server;
-        _server = null;
-        server.unsubscribe(&server_state_change);
-        server.destroy();
+        static if (has_rdp)
+        {
+            if (!_server)
+                return;
+            UDPSyncServer server = _server;
+            _server = null;
+            server.unsubscribe(&server_state_change);
+            server.destroy();
+        }
     }
 
-    void server_state_change(ActiveObject server, StateSignal signal)
+    static if (has_rdp)
     {
-        if (signal == StateSignal.destroyed && server is _server)
-            _server = null;
+        void server_state_change(ActiveObject server, StateSignal signal)
+        {
+            if (signal == StateSignal.destroyed && server is _server)
+                _server = null;
+        }
     }
 
     void on_datagram(UDPEndpoint* endpoint, const(void)[] data, ref UDPReceiveInfo info)
     {
+        const(ubyte)[] datagram = cast(const(ubyte)[])data;
+        if (!is_announce_datagram(datagram))
+            return;
         foreach (ref bound; _endpoint_set.endpoints[])
         {
-            if (bound.endpoint !is endpoint)
+            if (bound.udp !is endpoint)
                 continue;
             BaseInterface iface = info.ingress ? info.ingress : bound.binding.iface.get;
-            const(ubyte)[] datagram = cast(const(ubyte)[])data;
-            bool announce = is_announce_datagram(datagram);
+            InetAddress local = bound.binding.local;
             static if (has_ip)
             {
-                if (_multicast && bound.binding.local.family == AddressFamily.ipv4)
+                if (_multicast && local.family == AddressFamily.ipv4)
                 {
                     IPAddr destination = info.destination._a.ipv4.addr;
-                    bool group = destination == discovery_ipv4_group;
-                    InetAddress local = selected_local(destination, iface, bound.binding.local.port, group);
-                    if (announce && local.family == AddressFamily.ipv4)
-                        get_module!SyncDiscoveryModule.receive_announce(iface, local, info.source, datagram, info.rx_time);
-                    else if (!announce && !group && local.family == AddressFamily.ipv4 && _server)
-                        _server.receive(endpoint, data, info);
-                    return;
+                    local = selected_local(destination, iface, local.port, destination == discovery_ipv4_group);
+                    if (local.family != AddressFamily.ipv4)
+                        return;
                 }
             }
-            if (announce)
-                get_module!SyncDiscoveryModule.receive_announce(iface, bound.binding.local, info.source, datagram, info.rx_time);
-            else if (_server)
-                _server.receive(endpoint, data, info);
+            get_module!SyncDiscoveryModule.receive_announce(iface, local, info.source, datagram, info.rx_time);
             return;
         }
     }
@@ -586,7 +646,7 @@ nothrow @nogc:
             neighbors.remove(k);
     }
 
-    ubyte[] build_local_announce(ubyte[] buffer)
+    ubyte[] build_local_announce(ubyte[] buffer, ushort sync_port)
     {
         import manager.system : hostname, node_id;
 
@@ -596,6 +656,7 @@ nothrow @nogc:
         a.cluster = local_cluster[];
         a.role = local_role;
         a.flags = cast(ubyte)((local_claimed ? AnnounceFlags.claimed : 0) | (local_adopted ? AnnounceFlags.adopted : 0));
+        a.sync_port = sync_port;
         return encode_announce(a, buffer);
     }
 
@@ -643,9 +704,16 @@ private:
         n.flags = a.flags;
         n.last_seen = rx_time;
 
+        // a link is dialable only on the port the node's listener announced
+        InetAddress session = from;
+        session.port = a.sync_port;
         size_t known = n.links.length;
-        n.touch_link(iface, local, from, n.last_seen);
-        if (known && n.links.length > known)
+        n.touch_link(iface, local, session, n.last_seen);
+        if (n.links.length == known)
+            return;
+        if (a.role == PeerRole.authority && !a.sync_port)
+            log.warning("authority '", a.name, "' via ", iface ? iface.name[] : "ip", " (", from, ") announces no sync port: it runs firmware without RDP sync, or its listener does not serve this link");
+        else if (known)
             log.debug_("node '", a.name, "' also reachable via ", iface ? iface.name[] : "ip", " (", from, ")");
     }
 }
@@ -684,6 +752,7 @@ enum AnnounceTag : ubyte
     role = 3,
     cluster = 4,
     flags = 5,
+    sync_port = 6,
 }
 
 enum AnnounceFlags : ubyte
@@ -694,7 +763,6 @@ enum AnnounceFlags : ubyte
 
 enum neighbor_max_age = 600.seconds;
 
-alias default_discovery_port = default_sync_port;
 
 struct NodeAnnounce
 {
@@ -703,9 +771,9 @@ struct NodeAnnounce
     const(char)[] cluster;
     PeerRole role;
     ubyte flags;
+    ushort sync_port;   // 0 while the node accepts no sessions
 }
 
-// Byte 8 cannot be a sync queue, so the shared port can distinguish announcements without parsing them.
 static immutable ubyte[10] announce_magic = [ 'O', 'W', 'D', 'I', 'S', 'C', 1, 0, 0xFF, 0 ];
 
 ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
@@ -744,6 +812,12 @@ ubyte[] encode_announce(ref const NodeAnnounce a, ubyte[] buffer)
         return null;
     if (a.flags && !put(AnnounceTag.flags, (&a.flags)[0 .. 1]))
         return null;
+    if (a.sync_port)
+    {
+        ubyte[2] port = a.sync_port.nativeToBigEndian;
+        if (!put(AnnounceTag.sync_port, port[]))
+            return null;
+    }
     return buffer[0 .. offset];
 }
 
@@ -783,6 +857,11 @@ bool decode_announce(scope return const(ubyte)[] tlv, out NodeAnnounce a)
                 if (len != 1)
                     return false;
                 a.flags = value[0];
+                break;
+            case AnnounceTag.sync_port:
+                if (len != 2)
+                    return false;
+                a.sync_port = value[0 .. 2].bigEndianToNative!ushort;
                 break;
             default:
                 break;
@@ -871,6 +950,11 @@ unittest
         NodeAnnounce received;
         assert(decode_announce(encoded, received));
         assert(received.node_id == sent.node_id && received.name == sent.name && received.role == sent.role);
+        assert(received.sync_port == 0, "no listener, no dialable port");
+        sent.sync_port = 4900;
+        assert(decode_announce(encode_announce(sent, buffer), received) && received.sync_port == 4900);
+        sent.sync_port = 0;
+        encoded = encode_announce(sent, buffer);
         encoded[0] ^= 1;
         assert(!is_announce_datagram(encoded));
         assert(!decode_announce(encoded, received));
@@ -908,11 +992,25 @@ unittest
 
         domain.port(1234);
         assert(bind_port(domain._bind[0], domain.port) == 1234);
+        static if (has_rdp)
+        {
+            domain.sync_port(1234);
+            assert(!domain.validate(), "the listener cannot share the discovery port");
+            domain.sync_port(default_sync_port);
+            assert(domain.validate());
+        }
         domain.port(default_discovery_port);
 
         InetAddress wildcard = InetAddress(MACAddress().b, 1234);
         domain.bind((&wildcard)[0 .. 1]);
         assert(bind_port(domain._bind[0], domain.port) == 1234);
+        static if (has_rdp)
+        {
+            domain.sync_port(1234);
+            assert(!domain.validate(), "nor an explicit bind's port");
+            domain.sync_port(default_sync_port);
+            assert(domain.validate());
+        }
 
         const(char)[][2] bind_text = ["192.168.1.1", "[::1]"];
         Variant ip_bind = Variant(bind_text[]);
@@ -927,27 +1025,27 @@ unittest
             assert(bindings[0].local == InetAddress(IPAddr(192, 168, 1, 1), default_discovery_port));
             assert(bindings[1].local == InetAddress(IPv6Addr.loopback, default_discovery_port));
             assert(domain.multicast);
-            assert(domain.include_endpoint(bindings[0]));
-            assert(!domain.include_endpoint(bindings[1]));
-            assert(domain.prepare_multicast_bindings(bindings));
+            assert(domain.prepare_bindings(bindings));
             assert(domain._multicast_bindings.length == 1);
             assert(domain._multicast_bindings[0].local == InetAddress(IPAddr(192, 168, 1, 1), default_discovery_port));
             assert(bindings.length == 1);
             assert(bindings[0].local == InetAddress(IPAddr.any, default_discovery_port));
             collect_udp_bindings(domain._bind[], domain._interfaces[], domain.port, bindings);
-            assert(!domain.prepare_multicast_bindings(bindings));
+            assert(!domain.prepare_bindings(bindings));
 
             InetAddress[3] multicast_bind = [InetAddress(IPAddr(192, 168, 1, 1), 0),
                                              InetAddress(IPAddr(192, 168, 1, 2), 0),
                                              InetAddress(IPAddr(192, 168, 1, 3), 1234)];
             domain.bind(multicast_bind[]);
             collect_udp_bindings(domain._bind[], domain._interfaces[], domain.port, bindings);
-            assert(domain.prepare_multicast_bindings(bindings));
+            assert(domain.prepare_bindings(bindings));
             assert(domain._multicast_bindings.length == 3);
             assert(bindings.length == 2);
 
             domain.multicast(false);
-            assert(domain.include_endpoint(bindings[0]));
+            InetAddress[2] mixed = [InetAddress(IPAddr(192, 168, 1, 1), 0), InetAddress(IPv6Addr.loopback, 0)];
+            collect_udp_bindings(mixed[], domain._interfaces[], domain.port, bindings);
+            assert(!domain.prepare_bindings(bindings) && bindings.length == 1, "without multicast only the family filter applies");
 
             UDPBindEndpoint wildcard_binding = UDPBindEndpoint(ObjectRef!BaseInterface(), InetAddress(IPAddr.any, 6667));
             assert(UDPDiscovery.discovery_destination(wildcard_binding) == InetAddress(IPAddr.broadcast, 6667));

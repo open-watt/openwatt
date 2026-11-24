@@ -9,16 +9,19 @@ import manager.collection;
 import manager.features;
 
 import router.iface;
-import router.iface.endpoint : UDPEndpoint, UDPRecvHandler, foreach_ether_station, udp_open;
+import router.iface.endpoint : UDPEndpoint, foreach_ether_station;
 import router.iface.ethernet;
 
 static if (has_ip)
     import protocol.ip.address : IPAddress;
+static if (has_rdp)
+    import router.iface.rdp : RDPEndpoint;
 
 nothrow @nogc:
 
 
-enum ushort default_sync_port = 4826;
+enum ushort default_discovery_port = 4826;
+enum ushort default_sync_port = 4827;
 
 
 struct UDPBindEndpoint
@@ -30,41 +33,40 @@ struct UDPBindEndpoint
         => local == rhs.local && (local.family != AddressFamily.ether || iface == rhs.iface);
 }
 
-struct UDPBoundEndpoint
+struct BoundEndpoint
 {
     UDPBindEndpoint binding;
-    UDPEndpoint* endpoint;
+    union
+    {
+        UDPEndpoint* udp;
+        static if (has_rdp)
+            RDPEndpoint* rdp;
+    }
 }
 
-alias UDPBindingConfigure = bool delegate(UDPEndpoint* endpoint, ref const UDPBindEndpoint binding) nothrow @nogc;
-alias UDPBindingInclude = bool delegate(ref const UDPBindEndpoint binding) nothrow @nogc;
 alias UDPBindingsPrepare = bool delegate(ref Array!UDPBindEndpoint bindings) nothrow @nogc;
-alias UDPEndpointRemove = void delegate(UDPEndpoint* endpoint) nothrow @nogc;
 
-struct UDPEndpointHooks
+struct EndpointHooks
 {
-    UDPBindingsPrepare prepare;
-    UDPBindingInclude include;
-    UDPBindingConfigure configure;
-    UDPEndpointRemove remove;
-    UDPRecvHandler receive;
+    bool delegate(ref BoundEndpoint endpoint, EthernetStation station) nothrow @nogc open;
+    void delegate(ref BoundEndpoint endpoint) nothrow @nogc close;
 }
 
-struct UDPEndpointSet
+struct EndpointSet
 {
 nothrow @nogc:
 
-    Array!UDPBoundEndpoint endpoints;
+    Array!BoundEndpoint endpoints;
 
-    bool refresh(const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref UDPEndpointHooks hooks)
+    bool refresh(const(InetAddress)[] bind, const(ObjectRef!BaseInterface)[] interfaces, ushort port, ref EndpointHooks hooks, UDPBindingsPrepare prepare = null)
     {
         collect_udp_bindings(bind, interfaces, port, _desired);
-        if (hooks.prepare && hooks.prepare(_desired))
+        if (prepare && prepare(_desired))
             close(hooks);
         return refresh_desired(hooks);
     }
 
-    void close(ref UDPEndpointHooks hooks)
+    void close(ref EndpointHooks hooks)
     {
         while (endpoints.length)
             remove(endpoints.length - 1, hooks);
@@ -79,12 +81,8 @@ private:
     Array!UDPBindEndpoint _desired;
     MonoTime _retry_at;
 
-    bool refresh_desired(ref UDPEndpointHooks hooks)
+    bool refresh_desired(ref EndpointHooks hooks)
     {
-        if (hooks.include)
-            for (size_t i = _desired.length; i-- > 0; )
-                if (!hooks.include(_desired[i]))
-                    _desired.removeSwapLast(i);
         size_t i;
         while (i < endpoints.length)
         {
@@ -127,7 +125,7 @@ private:
         return false;
     }
 
-    bool ensure(ref UDPBindEndpoint binding, ref UDPEndpointHooks hooks)
+    bool ensure(ref UDPBindEndpoint binding, ref EndpointHooks hooks)
     {
         EthernetStation station;
         if (binding.local.family == AddressFamily.ether && binding.iface)
@@ -136,24 +134,18 @@ private:
             if (!station)
                 return false;
         }
-        UDPEndpoint* endpoint = udp_open(&binding.local, null, hooks.receive, station);
-        if (!endpoint)
+        BoundEndpoint endpoint;
+        endpoint.binding = binding;
+        if (!hooks.open(endpoint, station))
             return false;
-        if (hooks.configure && !hooks.configure(endpoint, binding))
-        {
-            endpoint.close();
-            return false;
-        }
-        endpoints.emplaceBack(binding, endpoint);
+        endpoints ~= endpoint;
         return true;
     }
 
-    void remove(size_t index, ref UDPEndpointHooks hooks)
+    void remove(size_t index, ref EndpointHooks hooks)
     {
-        UDPBoundEndpoint endpoint = endpoints[index];
-        if (hooks.remove)
-            hooks.remove(endpoint.endpoint);
-        endpoint.endpoint.close();
+        BoundEndpoint endpoint = endpoints[index];
+        hooks.close(endpoint);
         endpoints.removeSwapLast(index);
     }
 }
