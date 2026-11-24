@@ -1158,9 +1158,6 @@ unittest
         SendHandler replacement;
     }
 
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
-
     TestTxStream stream = alloc!TestTxStream(CID(1));
     scope(exit) free(stream);
 

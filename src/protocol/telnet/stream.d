@@ -796,9 +796,6 @@ unittest
 {
     import urt.mem : alloc, free;
 
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
-
     TelnetStream telnet = alloc!TelnetStream(CID(1));
     scope (exit) free(telnet);
 

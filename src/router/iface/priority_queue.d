@@ -426,11 +426,6 @@ private:
 
 unittest
 {
-    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
-
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
-
     ubyte[1] data;
     StackPacket low;
     low.init!RawFrame(data[]);

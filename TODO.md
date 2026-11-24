@@ -1589,11 +1589,6 @@ this is what remains.
   reflashing the image. Any recovery must handle skipped destructors and dirty
   shared state; an assertion-handler `longjmp` alone is not sufficient.
 
-- **Application recreation leaves the global page pool initialized**: `Application.~this` does not
-  deinitialize the pool, so a second `create_application()` in the same process asserts in
-  `page_pool_init`. Define ownership and teardown for shared pool users before adding more
-  application-backed integration unittests (found reviewing #718).
-
 - **The low-level `/element/set` command ignores element access**: `Application.element_set`
   calls `Element.value` without checking `Access.write`, allowing CLI writes to reported
   read-only identities such as a port's `circuit`. Define whether this command is an explicit

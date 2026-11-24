@@ -984,11 +984,6 @@ HTTPServer.Session* session_of(Stream stream)
 
 unittest
 {
-    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
-
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
-
     static struct Text
     {
     nothrow @nogc:

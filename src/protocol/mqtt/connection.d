@@ -679,7 +679,6 @@ private:
 unittest
 {
     import manager.collection;
-    import urt.mem.pagepool : page_pool_deinit, page_pool_init;
 
     static class Line : Stream
     {
@@ -713,8 +712,6 @@ unittest
         return h;
     }
 
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
     MQTTBroker broker = alloc!MQTTBroker(CID(1));
     scope (exit) free(broker);
     static immutable ubyte[] payload = [7];

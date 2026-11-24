@@ -413,9 +413,7 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
-        import urt.mem.pagepool : page_pool_init, page_pool_wake_hook;
-        bool pool_ready = page_pool_init();
-        debug assert(pool_ready, "page pool initialisation failed");
+        import urt.mem.pagepool : page_pool_wake_hook;
 
         bool reclaimer_registered = register_reclaimer(&reclaim_element_history, 32, false);
         debug assert(reclaimer_registered, "element history reclaimer registration failed");

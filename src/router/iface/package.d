@@ -2142,9 +2142,6 @@ unittest
 
     // a queue that frees a slot, by dispatch, abort or teardown, invites its waiters
     import router.iface.priority_queue : PriorityPacketQueue, QueuedFrame;
-    import urt.mem.pagepool : page_pool_init, page_pool_deinit;
-    bool owns_pool = page_pool_init();
-    scope(exit) if (owns_pool) page_pool_deinit();
 
     static final class Queued : Sink
     {

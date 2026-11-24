@@ -2973,9 +2973,6 @@ version (UseInternalIPStack) {} else version (linux)
         import core.sys.posix.sys.socket : AF_UNIX, SOCK_STREAM;
         import core.sys.posix.unistd : close;
 
-        bool owns_pool = page_pool_init();
-        scope (exit) if (owns_pool) page_pool_deinit();
-
         static struct Producer
         {
         nothrow @nogc:

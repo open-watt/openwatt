@@ -1318,9 +1318,6 @@ unittest
         }
     }
 
-    bool owns_pool = page_pool_init();
-    scope (exit) if (owns_pool) page_pool_deinit();
-
     TLSStream tls = alloc!TLSStream(CID(1));
     scope (exit) free(tls);
 
