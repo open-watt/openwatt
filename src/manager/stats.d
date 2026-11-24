@@ -13,16 +13,12 @@ import manager;
 import manager.component;
 import manager.device;
 import manager.element;
-import manager.system : node_id;
 
 nothrow @nogc:
 
 
-void create_system_device()
+void create_system_device(ulong peer_id)
 {
-    ulong peer_id = node_id();
-    if (!peer_id)
-        return;
     DeviceBuilder builder = g_app.devices.create("system", peer_id);
     Device system = builder.device;
     Component mem = builder.component("mem");
