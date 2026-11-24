@@ -1,26 +1,8 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="conf">
       <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\goodwe_profiles">
-      <UniqueIdentifier>{a5e82299-0fc3-4ab5-be5b-974362653f16}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\ha_profiles">
-      <UniqueIdentifier>{70705f6a-320d-456c-bb7e-04d00818d619}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\modbus_profiles">
-      <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\mqtt_profiles">
-      <UniqueIdentifier>{4f846ad0-fba7-4420-8cea-b3a91e8585d6}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\rest_profiles">
-      <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\zigbee_profiles">
-      <UniqueIdentifier>{93769be7-b621-4abb-87b0-29e9db81fbc9}</UniqueIdentifier>
     </Filter>
     <Filter Include="docs">
       <UniqueIdentifier>{8b262c04-bc01-4af0-ab2c-8678c8779f0c}</UniqueIdentifier>
@@ -42,9 +24,6 @@
     </Filter>
     <Filter Include="src\apps\ota">
       <UniqueIdentifier>{a1e8d4d6-5b3f-4fa0-9c2e-7d9b2c8e5f3a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\db">
-      <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\driver">
       <UniqueIdentifier>{cc240544-3e97-4f75-a128-521410a70930}</UniqueIdentifier>
@@ -160,9 +139,6 @@
     <Filter Include="src\router\iface">
       <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\port">
-      <UniqueIdentifier>{b7012d9a-641d-492c-8634-9dbdb9c38a25}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
     </Filter>
@@ -175,104 +151,107 @@
     <Filter Include="third_party">
       <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\std">
-      <UniqueIdentifier>{3e8cc76a-0495-4334-982d-0dad03c153f7}</UniqueIdentifier>
-    </Filter>
     <Filter Include="third_party\urt">
       <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\crypto">
-      <UniqueIdentifier>{aeb0c73e-df99-45b6-843e-64ff84d35cbe}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src">
+      <UniqueIdentifier>{FEB80E2E-8FF8-5826-8F24-C095983F05FE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\digest">
-      <UniqueIdentifier>{c019eeb4-22e9-470a-8284-4be630b35495}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\std">
+      <UniqueIdentifier>{1E6611FF-B86D-56E8-9B3E-D2115ED9B96C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver">
-      <UniqueIdentifier>{1b209419-c85a-4668-9e21-0eed3a171624}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt">
+      <UniqueIdentifier>{20C42CF0-4B40-52E2-8D9A-CAA765F31CBE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\baremetal">
-      <UniqueIdentifier>{12969512-f788-41a6-8338-b3537091c1ef}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\crypto">
+      <UniqueIdentifier>{F3549B0D-57F8-5D83-AE4E-DB8D577ADFA1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\bk7231">
-      <UniqueIdentifier>{12c021f9-b490-45e5-b19b-64df44a71c6d}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\digest">
+      <UniqueIdentifier>{C6CF2E0A-B0AC-5D8E-B2A1-FA27279C4DF1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\bl618">
-      <UniqueIdentifier>{75354b46-e458-4248-9fbb-c2507c2198e9}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver">
+      <UniqueIdentifier>{EE080853-9E33-59D8-A30B-50C74C1AF4C5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\bl808">
-      <UniqueIdentifier>{feecb6a6-0ef0-45f9-93c1-6132c66b633c}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\baremetal">
+      <UniqueIdentifier>{9F888DA5-56A6-5D99-850E-1057F033C825}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\bl_common">
-      <UniqueIdentifier>{a82f7ccb-1d4e-4af4-9b8c-7e3c5d1a6f9e}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\bk7231">
+      <UniqueIdentifier>{7DE108DB-761C-5C97-9D67-80B9AF4F5F3C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\bl808_m0">
-      <UniqueIdentifier>{8b3d7c5e-4a2f-4e91-bc9d-3f8a1c2d4e5f}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\bl618">
+      <UniqueIdentifier>{9EDC12D5-4025-5FD9-BC15-A306D67C08CD}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\dot1x">
-      <UniqueIdentifier>{e27ad9ff-bf3e-4ac8-8a7f-035e716c22ff}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\bl808">
+      <UniqueIdentifier>{3A219A0F-38FF-5674-8D82-15228F997014}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\esp32">
-      <UniqueIdentifier>{e0ec80f2-b958-404d-85ff-fb26952715fa}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\bl_common">
+      <UniqueIdentifier>{022EE388-CD27-56F9-B400-066CBAB90095}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\freertos">
-      <UniqueIdentifier>{ce13cbb5-f391-4f55-ae5b-8a567ebcf701}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\bl808_m0">
+      <UniqueIdentifier>{0B8BBCDA-8277-546E-9F53-27BB983D0722}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\posix">
-      <UniqueIdentifier>{84233c23-1801-4982-82ef-0fcf4ec05ea3}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\dot1x">
+      <UniqueIdentifier>{44F20575-D2FE-5AE1-AEBF-DE2BD105A80B}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\rp2350">
-      <UniqueIdentifier>{b3b1b47c-dd8f-4f38-93b0-440e2d6d3692}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\esp32">
+      <UniqueIdentifier>{41FB9D63-E1AB-5DE0-B856-C5E3934B288C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\stm32">
-      <UniqueIdentifier>{395bc433-cda0-406e-ac4c-6a9fa8236138}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\freertos">
+      <UniqueIdentifier>{0350A94B-0663-5B14-AA69-267934FB5632}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\windows">
-      <UniqueIdentifier>{a7c3f1d2-8b4e-4f9a-b6d1-e2f4a5c8d7b3}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\posix">
+      <UniqueIdentifier>{DDD628B3-DD06-5370-B22A-055250BCF4FA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\driver\wpa">
-      <UniqueIdentifier>{06328452-81dd-4c92-b70c-4dfc35165d05}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\rp2350">
+      <UniqueIdentifier>{0504BF8A-1402-54CD-8B7A-0B4349023479}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\format">
-      <UniqueIdentifier>{0576e295-8b70-4b93-8071-a6fc436aef18}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\stm32">
+      <UniqueIdentifier>{AC25DDB6-0DC5-569F-9EBD-51FD557E6AA9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\internal">
-      <UniqueIdentifier>{89a11fa8-2d0a-4b9a-9d7c-52b0c5df40b8}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\windows">
+      <UniqueIdentifier>{DC13E0AC-B736-5A78-B328-7C8AC06D014B}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\internal\stdc">
-      <UniqueIdentifier>{ca24ab34-3ced-4660-85ce-71b24866e63b}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\driver\wpa">
+      <UniqueIdentifier>{6CE5DBDF-922C-5F74-A8C6-969D4DD59201}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\internal\sys">
-      <UniqueIdentifier>{6aed1c5f-ebc2-4e3e-8b87-f6f39b96eb12}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\format">
+      <UniqueIdentifier>{28068B2E-6058-501D-A483-BA6D4FAE73C1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\internal\sys\freertos">
-      <UniqueIdentifier>{a8b9c0d1-e2f3-4a5b-9c8d-7e6f5d4c3b2a}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\internal">
+      <UniqueIdentifier>{3346F2B0-48F9-51F6-B0EC-52CD85165BE1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\internal\sys\winows">
-      <UniqueIdentifier>{51839fa1-68ac-4d92-b82c-33642d718550}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\internal\stdc">
+      <UniqueIdentifier>{F1B3E247-5772-59D8-906E-94911E359ACC}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\intrinsic">
-      <UniqueIdentifier>{40268c2d-d19f-45e8-83bb-6036d91e335e}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\internal\sys">
+      <UniqueIdentifier>{749F499F-849F-5D1B-90E8-32DA11A3C865}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\mem">
-      <UniqueIdentifier>{744f1601-c161-4ba0-a646-e2a9c869655f}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\internal\sys\freertos">
+      <UniqueIdentifier>{EEBA6D11-C800-56CC-857E-B4F8D289EB1A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\meta">
-      <UniqueIdentifier>{8691deb8-7d43-4182-934a-52eaa14924d4}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\internal\sys\windows">
+      <UniqueIdentifier>{955120A2-A5DC-5F5A-9326-E01DFB491650}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\string">
-      <UniqueIdentifier>{eb6617e4-792c-4476-90b3-977eba93f55f}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\intrinsic">
+      <UniqueIdentifier>{145474F3-C236-5C76-B0DF-2C7BA537BAFA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\sync">
-      <UniqueIdentifier>{d4e1f5a2-3b78-4c9e-8a1b-5f2e3d4c6b7a}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\mem">
+      <UniqueIdentifier>{62E93222-49DE-55A3-8CDA-E023869B1ACF}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\si">
-      <UniqueIdentifier>{af470b6a-000a-4e83-9502-2ea2ca5f3159}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\meta">
+      <UniqueIdentifier>{445AD632-7975-5991-AB75-D790BD98A4D5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\sync">
-      <UniqueIdentifier>{A56B1B62-5853-478C-92C4-D91D52591A9E}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\string">
+      <UniqueIdentifier>{6A38C68A-BB0B-5408-8C4D-66AEA7BF4781}</UniqueIdentifier>
     </Filter>
-    <Filter Include="third_party\urt\range">
-      <UniqueIdentifier>{fda610db-eacb-4a07-80cb-fffc185f2c9a}</UniqueIdentifier>
+    <Filter Include="third_party\urt\src\urt\sync">
+      <UniqueIdentifier>{C89795DA-EDEF-56AE-9939-9E904980EEDC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\si">
+      <UniqueIdentifier>{9261EDC8-3B60-5D73-BBED-AD8D5F085960}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\range">
+      <UniqueIdentifier>{32A24293-E00C-5D6B-A158-006B894EFE21}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\npcap-sdk-1.15">
       <UniqueIdentifier>{4f3f0359-c743-426b-8fb4-fd5688b46048}</UniqueIdentifier>
@@ -283,608 +262,47 @@
     <Filter Include="third_party\npcap-sdk-1.15\Include\pcap">
       <UniqueIdentifier>{daf01d7a-6123-44e3-93b8-e1fda0fd67fe}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\driver\bl808">
+      <UniqueIdentifier>{E94A1BC0-9082-52D2-B4C3-3125FE232E9C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\boards\smartevse">
+      <UniqueIdentifier>{B1E70ED5-2EEF-54C9-B8CE-89B067AC9F34}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\font">
+      <UniqueIdentifier>{DD0896FA-F7BF-5AF7-B194-45EDF71D42F4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\rtc">
+      <UniqueIdentifier>{64F3FA20-C3BC-5B0E-A78C-B3A3C3E88FED}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\config">
+      <UniqueIdentifier>{60C0E72D-7198-59DD-9B75-101F2DDACEFF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\core">
+      <UniqueIdentifier>{9D383F47-17B3-5EA9-9FE1-CEC37A46D45C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\driver\bl808_d0">
+      <UniqueIdentifier>{7C51B8FC-9038-5DBA-B6BC-AE2AD10F258D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\driver\cortex_m">
+      <UniqueIdentifier>{D790EF14-3ADE-5D6F-9E88-6E7196EDD880}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\driver\mt7621">
+      <UniqueIdentifier>{FE0ECEEB-A0F5-5727-8213-DF163522FDF5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\driver\riscv">
+      <UniqueIdentifier>{8872B8C0-F947-5C3A-985C-30F58BECECEB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\fs">
+      <UniqueIdentifier>{2930E131-40F0-5CDD-8373-968A29388B4E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\internal\sys\posix">
+      <UniqueIdentifier>{3878FC99-CA16-5457-AA6F-9FB93A135937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\src\urt\mem\profile">
+      <UniqueIdentifier>{769D221D-1197-5162-A55C-B2743F64736E}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\driver\baremetal\ble.d">
-      <Filter>src\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\baremetal\system.d">
-      <Filter>src\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\baremetal\watchdog.d">
-      <Filter>src\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\baremetal\wifi.d">
-      <Filter>src\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\baremetal\wpan.d">
-      <Filter>src\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\ble.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\can.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\boards\smartevse.d">
-      <Filter>src\driver\boards</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\esp32\system.d">
-      <Filter>src\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\esp32\idf_log_bridge.d">
-      <Filter>src\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\esp32\watchdog.d">
-      <Filter>src\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\power\hardware.d">
-      <Filter>src\driver\power</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\power\regulator.d">
-      <Filter>src\driver\power</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\ethernet.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\ble.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\can.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\ctrl_iface.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\ethernet.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\fdwatch.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\hostapd.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\netlink.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\nl80211.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\raw.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\supervisor.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\sysfs.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\system.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\wifi.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\linux\wpa_supplicant.d">
-      <Filter>src\driver\linux</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\system.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\watchdog.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\wifi.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\wpan.d">
-      <Filter>src\driver</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\adapter_watcher.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\ethernet.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\iphlpapi.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\npcap.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\pcap.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\system.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\wifi.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\driver\windows\wlanapi.d">
-      <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\main.d">
-      <Filter>src</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\component.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\config.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\id.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\cron.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\device.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\element.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\series.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\ows.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\package.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\path.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\plugin.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\profile.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\reactor.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\record.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\config_revision.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\saved_config.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\secret.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\signal.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\binary_encoder.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\console.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\discovery.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\encoder.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\json_encoder.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\package.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\peer.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\peering.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\udp_bind.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\udp_server.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sync\ws_server.d">
-      <Filter>src\manager\sync</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\value.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\bridge.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\console.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\duplex.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\file.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\memory.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\package.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\serial.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\usb_serial.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ip\client.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ip\tcp_stream.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tls\certificate.d">
-      <Filter>src\protocol\tls</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tls\package.d">
-      <Filter>src\protocol\tls</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tls\stream.d">
-      <Filter>src\protocol\tls</Filter>
-    </DCompile>
-    <DCompile Include="src\tools\protobuf\package.d">
-      <Filter>src\tools\protobuf</Filter>
-    </DCompile>
-    <DCompile Include="src\tools\protobuf\parse.d">
-      <Filter>src\tools\protobuf</Filter>
-    </DCompile>
-    <DCompile Include="src\devices\goodwe\scanner.d">
-      <Filter>src\devices\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\log.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\bitmap.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\builtin_commands.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\command.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\graph.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\live_view.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\package.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\address_table.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\bridge.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\package.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\vlan.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\wifi.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\wpan.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\port.d">
-      <Filter>src\router</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\att.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\binding.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\client.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\device.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\iface.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\package.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\stream.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\can\binding.d">
-      <Filter>src\protocol\can</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\can\iface.d">
-      <Filter>src\protocol\can</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\can\package.d">
-      <Filter>src\protocol\can</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\cpc\package.d">
-      <Filter>src\protocol\cpc</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\esphome\binding.d">
-      <Filter>src\protocol\esphome</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\esphome\client.d">
-      <Filter>src\protocol\esphome</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\esphome\package.d">
-      <Filter>src\protocol\esphome</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\goodwe\aa55.d">
-      <Filter>src\protocol\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\goodwe\binding.d">
-      <Filter>src\protocol\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\goodwe\package.d">
-      <Filter>src\protocol\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\gpio\package.d">
-      <Filter>src\protocol\gpio</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\binding.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\client.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\message.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\package.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\server.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\staticfiles.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\websocket.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\binding.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\iface.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\message.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\node.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\package.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\modbus\sunspec.d">
-      <Filter>src\protocol\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\binding.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\broker.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\client.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\codec.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\connection.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\package.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\session.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\mqtt\topic.d">
-      <Filter>src\protocol\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ntp\client.d">
-      <Filter>src\protocol\ntp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ntp\package.d">
-      <Filter>src\protocol\ntp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\obd\iface.d">
-      <Filter>src\protocol\obd</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\obd\isotp.d">
-      <Filter>src\protocol\obd</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\obd\package.d">
-      <Filter>src\protocol\obd</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\packet.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\priority_queue.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\function_command.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\agent.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\asn1.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\client.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\oid.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\package.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\snmp\pdu.d">
-      <Filter>src\protocol\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\spinel\client.d">
-      <Filter>src\protocol\spinel</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\spinel\package.d">
-      <Filter>src\protocol\spinel</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\binding.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\iface.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\master.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\package.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\twc.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\vehicle_codec.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\vehicle_crypto.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\vehicle_scanner.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\vehicle_session.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\vehicle_retry.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\syslog.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\system.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\mac.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\telnet\client.d">
-      <Filter>src\protocol\telnet</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\telnet\server.d">
-      <Filter>src\protocol\telnet</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\telnet\stream.d">
-      <Filter>src\protocol\telnet</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\session.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\telnet\package.d">
-      <Filter>src\protocol\telnet</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\console.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sample\wire.d">
-      <Filter>src\manager\sample</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sample\codec.d">
-      <Filter>src\manager\sample</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sample\package.d">
-      <Filter>src\manager\sample</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\sample\spec.d">
-      <Filter>src\manager\sample</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\binding.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ezsp\package.d">
-      <Filter>src\protocol\ezsp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ezsp\ashv2.d">
-      <Filter>src\protocol\ezsp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ezsp\commands.d">
-      <Filter>src\protocol\ezsp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ezsp\client.d">
-      <Filter>src\protocol\ezsp</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\checksum.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\endpoint.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\ethernet.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\group.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\udp.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\client.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\client6.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\lease.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\message.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\message6.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\option.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\package.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dhcp\server.d">
-      <Filter>src\protocol\dhcp</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dns\message.d">
-      <Filter>src\protocol\dns</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dns\package.d">
-      <Filter>src\protocol\dns</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\dns\server.d">
-      <Filter>src\protocol\dns</Filter>
-    </DCompile>
     <DCompile Include="src\apps\api\package.d">
       <Filter>src\apps\api</Filter>
     </DCompile>
@@ -954,25 +372,493 @@
     <DCompile Include="src\apps\ota\package.d">
       <Filter>src\apps\ota</Filter>
     </DCompile>
-    <DCompile Include="src\router\pcap.d">
-      <Filter>src\router</Filter>
+    <DCompile Include="src\devices\goodwe\scanner.d">
+      <Filter>src\devices\goodwe</Filter>
     </DCompile>
-    <DCompile Include="src\router\pcap_server.d">
-      <Filter>src\router</Filter>
+    <DCompile Include="src\driver\baremetal\ble.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\ethernet.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\sfp.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\system.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\watchdog.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\wifi.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\baremetal\wpan.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\bl808\ipc_ids.d">
+      <Filter>src\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\bl808\xram.d">
+      <Filter>src\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\ble.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\binding.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\display.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\evse.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\hardware.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\package.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\boards\smartevse\pins.d">
+      <Filter>src\driver\boards\smartevse</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\can.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\crash.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\idf_log_bridge.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\system.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\watchdog.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\ethernet.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\font\render.d">
+      <Filter>src\driver\font</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\font\small.d">
+      <Filter>src\driver\font</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\ble.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\bridge.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\can.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\ctrl_iface.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\ethernet.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\fdwatch.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\hostapd.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\netlink.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\netlink_dump.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\netlink_write.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\nl80211.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\nl80211_ap.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\nl80211_sta.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\raw.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\supervisor.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\sysfs.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\system.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\wifi.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\wpa_supplicant.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\power\hardware.d">
+      <Filter>src\driver\power</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\power\regulator.d">
+      <Filter>src\driver\power</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\rtc\pcf85063.d">
+      <Filter>src\driver\rtc</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\sfp.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\system.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\watchdog.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\wifi.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\adapter_watcher.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\ethernet.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\iphlpapi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\npcap.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\pcap.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\system.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\wifi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\wlanapi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\wpan.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\main.d">
+      <Filter>src</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\base.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\binding.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\bootguard.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\collection.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\component.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\config.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\config_revision.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\argument.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\bitmap.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\builtin_commands.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\collection_commands.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\command.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\console.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\function_command.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\graph.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\live_view.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\package.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\session.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\table.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\tree_view.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\cron.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\device.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\element.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\expression.d">
+      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\features.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\package.d">
-      <Filter>src\protocol</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\expression.d">
+    <DCompile Include="src\manager\id.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\log.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\object_signal.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\ows.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\package.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\panel.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\path.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\plugin.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\profile.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\reactor.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\record.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sample\codec.d">
+      <Filter>src\manager\sample</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sample\package.d">
+      <Filter>src\manager\sample</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sample\spec.d">
+      <Filter>src\manager\sample</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sample\wire.d">
+      <Filter>src\manager\sample</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\saved_config.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\secret.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\series.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\signal.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\stats.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\binary_encoder.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\console.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\discovery.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\encoder.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\json_encoder.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\package.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\peer.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\peering.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\udp_bind.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\udp_server.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync\ws_server.d">
+      <Filter>src\manager\sync</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\syslog.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\system.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\value.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\att.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\binding.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\client.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\device.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\iface.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\package.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\stream.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\binding.d">
+      <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\iface.d">
+      <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\package.d">
+      <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\cpc\package.d">
+      <Filter>src\protocol\cpc</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\client.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\client6.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\lease.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\message.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\message6.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\option.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\package.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\server.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\message.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\package.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\server.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\binding.d">
+      <Filter>src\protocol\esphome</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\client.d">
+      <Filter>src\protocol\esphome</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\package.d">
+      <Filter>src\protocol\esphome</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\ashv2.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\client.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\commands.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\package.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\aa55.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\binding.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\package.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\gpio\package.d">
+      <Filter>src\protocol\gpio</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\binding.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\client.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\fileserver.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\message.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\package.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\server.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\websocket.d">
+      <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\address.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\arp.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\client.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\firewall.d">
@@ -987,13 +873,13 @@
     <DCompile Include="src\protocol\ip\igmp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\linux_mirror.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\mld.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\nd.d">
-      <Filter>src\protocol\ip</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ip\ra.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\neighbour.d">
@@ -1003,6 +889,9 @@
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\pool.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\ra.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\route.d">
@@ -1017,8 +906,77 @@
     <DCompile Include="src\protocol\ip\tcp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\tcp_stream.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\udp.d">
       <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\binding.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\iface.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\message.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\node.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\package.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\sunspec.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\binding.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\broker.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\client.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\codec.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\connection.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\ha_discovery.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\ha_jinja.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\package.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\session.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\topic.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ntp\client.d">
+      <Filter>src\protocol\ntp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ntp\package.d">
+      <Filter>src\protocol\ntp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\iface.d">
+      <Filter>src\protocol\obd</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\isotp.d">
+      <Filter>src\protocol\obd</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\obd\package.d">
+      <Filter>src\protocol\obd</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\package.d">
+      <Filter>src\protocol</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ppp\client.d">
       <Filter>src\protocol\ppp</Filter>
@@ -1028,6 +986,81 @@
     </DCompile>
     <DCompile Include="src\protocol\ppp\server.d">
       <Filter>src\protocol\ppp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\agent.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\asn1.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\client.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\oid.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\package.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\pdu.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\client.d">
+      <Filter>src\protocol\spinel</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\package.d">
+      <Filter>src\protocol\spinel</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\client.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\package.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\server.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\stream.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\binding.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\iface.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\master.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\package.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\twc.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_codec.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_crypto.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_retry.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_scanner.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle_session.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\certificate.d">
+      <Filter>src\protocol\tls</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\package.d">
+      <Filter>src\protocol\tls</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\stream.d">
+      <Filter>src\protocol\tls</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\aps.d">
       <Filter>src\protocol\zigbee</Filter>
@@ -1056,728 +1089,989 @@
     <DCompile Include="src\protocol\zigbee\zdo.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\argument.d">
-      <Filter>src\manager\console</Filter>
+    <DCompile Include="src\router\iface\address_table.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\bridge.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\checksum.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\endpoint.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\ethernet.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\group.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\i2c.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\mac.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\package.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\packet.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\priority_queue.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\rdp.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\sff8472.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\sfp.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\udp.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\vlan.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\wifi.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\wpan.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\pcap.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\pcap_server.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\port.d">
+      <Filter>src\router</Filter>
     </DCompile>
     <DCompile Include="src\router\status.d">
       <Filter>src\router</Filter>
     </DCompile>
-    <DCompile Include="src\manager\base.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\router\stream\bridge.d">
+      <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\collection_commands.d">
-      <Filter>src\manager\console</Filter>
+    <DCompile Include="src\router\stream\console.d">
+      <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\table.d">
-      <Filter>src\manager\console</Filter>
+    <DCompile Include="src\router\stream\duplex.d">
+      <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\tree_view.d">
-      <Filter>src\manager\console</Filter>
+    <DCompile Include="src\router\stream\file.d">
+      <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\manager\collection.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\router\stream\memory.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\package.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\serial.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\usb_serial.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\tools\protobuf\package.d">
+      <Filter>src\tools\protobuf</Filter>
+    </DCompile>
+    <DCompile Include="src\tools\protobuf\parse.d">
+      <Filter>src\tools\protobuf</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\config\urt_config.d">
+      <Filter>third_party\urt\config</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\core\atomic.d">
+      <Filter>third_party\urt\src\core</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\object.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\std\math.d">
-      <Filter>third_party\std</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\ble.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\can.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\gpio.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\irq.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\timer.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\uart.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wifi.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpan.d">
-      <Filter>third_party\urt\driver</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d">
-      <Filter>third_party\urt\driver\wpa</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d">
-      <Filter>third_party\urt\driver\wpa</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d">
-      <Filter>third_party\urt\driver\wpa</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\package.d">
-      <Filter>third_party\urt\driver\wpa</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wpa\supplicant.d">
-      <Filter>third_party\urt\driver\wpa</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\baremetal\exception.d">
-      <Filter>third_party\urt\driver\baremetal</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\alloc.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\gpio.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\irq.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\package.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\syscalls.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\timer.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\identity.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\pbuf.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\trng.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\wifi.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bk7231\sdk_stubs.d">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\irq.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\package.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\syscalls.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\timer.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\uart.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\i2c.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\ipc.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\irq.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\package.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\spi.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\syscalls.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\timer.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\led.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\uart.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\xram.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\gpio.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\system.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\trng.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl_common\identity.d">
-      <Filter>third_party\urt\driver\bl_common</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
-      <Filter>third_party\urt\driver\bl808_m0</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\bl_ops.d">
-      <Filter>third_party\urt\driver\bl808_m0</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi.d">
-      <Filter>third_party\urt\driver\bl808_m0</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\dot1x\eapol.d">
-      <Filter>third_party\urt\driver\dot1x</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\alloc.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\ble.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\can.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\gpio.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\exception.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\irq.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\timer.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\uart.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\wifi.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\esp32\wpan.d">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\freertos\fibre.d">
-      <Filter>third_party\urt\driver\freertos</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\posix\alloc.d">
-      <Filter>third_party\urt\driver\posix</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\posix\exception.d">
-      <Filter>third_party\urt\driver\posix</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\posix\gpio.d">
-      <Filter>third_party\urt\driver\posix</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\irq.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\package.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\syscalls.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\timer.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\rp2350\uart.d">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\irq.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\package.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\syscalls.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\timer.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\stm32\uart.d">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\windows\alloc.d">
-      <Filter>third_party\urt\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\windows\ble.d">
-      <Filter>third_party\urt\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\windows\exception.d">
-      <Filter>third_party\urt\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\windows\fibre.d">
-      <Filter>third_party\urt\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\ansi.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\ascii.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\format.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\package.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\regex.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\string.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\tailstring.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\string\uni.d">
-      <Filter>third_party\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\critical.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\event.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\mpmc.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\mpsc.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\mutex.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\semaphore.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\spinlock.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\sync\spsc.d">
-      <Filter>third_party\urt\sync</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\si\package.d">
-      <Filter>third_party\urt\si</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\si\quantity.d">
-      <Filter>third_party\urt\si</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\si\unit.d">
-      <Filter>third_party\urt\si</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\range\package.d">
-      <Filter>third_party\urt\range</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\range\primitives.d">
-      <Filter>third_party\urt\range</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d">
-      <Filter>third_party\urt\meta</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\meta\nullable.d">
-      <Filter>third_party\urt\meta</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\meta\package.d">
-      <Filter>third_party\urt\meta</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\meta\tuple.d">
-      <Filter>third_party\urt\meta</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\alloc.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\allocator.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\freelist.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\package.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\refman.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\region.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\ring.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\string.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\temp.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\mem\tracking.d">
-      <Filter>third_party\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\intrinsic\package.d">
-      <Filter>third_party\urt\intrinsic</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d">
-      <Filter>third_party\urt\intrinsic</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\lifetime.d">
-      <Filter>third_party\urt\internal</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
-      <Filter>third_party\urt\internal</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\os.c">
-      <Filter>third_party\urt\internal</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\format\json.d">
-      <Filter>third_party\urt\format</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\digest\hmac.d">
-      <Filter>third_party\urt\digest</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\digest\md5.d">
-      <Filter>third_party\urt\digest</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\digest\sha.d">
-      <Filter>third_party\urt\digest</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\aes.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\aes_keywrap.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\der.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\ecdh.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\pbkdf2.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\pem.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\pki.d">
-      <Filter>third_party\urt\crypto</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\crypto\random.d">
-      <Filter>third_party\urt\crypto</Filter>
+      <Filter>third_party\urt\src\std</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\algorithm.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\array.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\async.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\atomic.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\attribute.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\build.d">
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\compiler.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\conv.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crc.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\aes.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\aes_keywrap.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\der.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\ecdh.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pbkdf2.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pem.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pki.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\random.d">
+      <Filter>third_party\urt\src\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\dbg.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\hmac.d">
+      <Filter>third_party\urt\src\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\md5.d">
+      <Filter>third_party\urt\src\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\sha.d">
+      <Filter>third_party\urt\src\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\adc.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\baremetal\exception.d">
+      <Filter>third_party\urt\src\urt\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\baremetal\heap.d">
+      <Filter>third_party\urt\src\urt\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\alloc.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\heap.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\identity.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\irq.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\package.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\pbuf.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\sdk_stubs.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\timer.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\trng.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bk7231\wifi.d">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl618\irq.d">
+      <Filter>third_party\urt\src\urt\driver\bl618</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl618\package.d">
+      <Filter>third_party\urt\src\urt\driver\bl618</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl618\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\bl618</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl618\timer.d">
+      <Filter>third_party\urt\src\urt\driver\bl618</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\clock.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\ipc.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\pwm.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\reset.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\watchdog.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\ws2812.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\xram.d">
+      <Filter>third_party\urt\src\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\i2c.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\irq.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\package.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\spi.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_d0\timer.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_d0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\bl_ops.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\event.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\flash.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_lmac.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_pm.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi_wpa.d">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\heap.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\identity.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\system.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\trng.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\uart.d">
+      <Filter>third_party\urt\src\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\ble.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\can.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\cortex_m\fault.d">
+      <Filter>third_party\urt\src\urt\driver\cortex_m</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\cortex_m\nvic.d">
+      <Filter>third_party\urt\src\urt\driver\cortex_m</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\counter.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\debugger.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\dot1x\eapol.d">
+      <Filter>third_party\urt\src\urt\driver\dot1x</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\adc.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\alloc.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\ble.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\can.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\counter.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\ethernet.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\event.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\exception.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\i2c.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\idf_log.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\irq.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\nvs.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\pwm.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\spi.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\timer.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\uart.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\wifi.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\esp32\wpan.d">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\ethernet.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\event.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\event_core.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\freertos\fibre.d">
+      <Filter>third_party\urt\src\urt\driver\freertos</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\gpio.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\i2c.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\irq.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\cache.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\ethernet.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\event.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\fault.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\heap.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\i2c.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\irq.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\netcon.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\package.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\spi_nor.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\timer.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\uart.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\mt7621\watchdog.d">
+      <Filter>third_party\urt\src\urt\driver\mt7621</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\nvs.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\alloc.d">
+      <Filter>third_party\urt\src\urt\driver\posix</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\crash_handler.d">
+      <Filter>third_party\urt\src\urt\driver\posix</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\exception.d">
+      <Filter>third_party\urt\src\urt\driver\posix</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\posix</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\posix\uart.d">
+      <Filter>third_party\urt\src\urt\driver\posix</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\pwm.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\reset.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\riscv\clint.d">
+      <Filter>third_party\urt\src\urt\driver\riscv</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\riscv\csr.d">
+      <Filter>third_party\urt\src\urt\driver\riscv</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\routerboot.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\bootrom.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\event.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\heap.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\identity.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\irq.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\package.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\pwm.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\timer.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\trng.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\uart.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\watchdog.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\rp2350\ws2812.d">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\soft_pwm.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\spi.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\event.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\gpio.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\heap.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\identity.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\irq.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\package.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\pwm.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\syscalls.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\timer.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\trng.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\uart.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\stm32\watchdog.d">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\timer.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\uart.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\uart_core.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wifi.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\windows\alloc.d">
+      <Filter>third_party\urt\src\urt\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\windows\ble.d">
+      <Filter>third_party\urt\src\urt\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\windows\exception.d">
+      <Filter>third_party\urt\src\urt\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\windows\fibre.d">
+      <Filter>third_party\urt\src\urt\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\windows\uart.d">
+      <Filter>third_party\urt\src\urt\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\authenticator.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\package.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\supplicant.d">
+      <Filter>third_party\urt\src\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpan.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\ws2812.d">
+      <Filter>third_party\urt\src\urt\driver</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\encoding.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\endian.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\exception.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\fibre.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\file.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\format\json.d">
+      <Filter>third_party\urt\src\urt\format</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\format\xml.d">
+      <Filter>third_party\urt\src\urt\format</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\fs\littlefs.d">
+      <Filter>third_party\urt\src\urt\fs</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\fs\spiffs.d">
+      <Filter>third_party\urt\src\urt\fs</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\hash.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\inet.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\aa.d">
-      <Filter>third_party\urt\internal</Filter>
+      <Filter>third_party\urt\src\urt\internal</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\bitop.d">
-      <Filter>third_party\urt\internal</Filter>
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\dwarfeh.d">
+      <Filter>third_party\urt\src\urt\internal</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\exception.d">
-      <Filter>third_party\urt\internal</Filter>
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\lifetime.d">
+      <Filter>third_party\urt\src\urt\internal</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\mbedtls.c">
-      <Filter>third_party\urt\internal</Filter>
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\noeh.d">
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\os.c">
+      <Filter>third_party\urt\src\urt\internal</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\errno.d">
-      <Filter>third_party\urt\internal\stdc</Filter>
+      <Filter>third_party\urt\src\urt\internal\stdc</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdio.d">
-      <Filter>third_party\urt\internal\stdc</Filter>
+      <Filter>third_party\urt\src\urt\internal\stdc</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdlib.d">
-      <Filter>third_party\urt\internal\stdc</Filter>
+      <Filter>third_party\urt\src\urt\internal\stdc</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\freertos\package.d">
-      <Filter>third_party\urt\internal\sys\freertos</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\freertos</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sspi.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\package.d">
+      <Filter>third_party\urt\src\urt\internal\sys\posix</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\subauth.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\w32api.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincon.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincrypt.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\windef.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winerror.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winnt.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winsock2.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winbase.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winuser.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\posix\termios.d">
+      <Filter>third_party\urt\src\urt\internal\sys\posix</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetyps.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntdef.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecapi.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecpkg.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\package.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\schannel.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sdkddkver.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\security.d">
-      <Filter>third_party\urt\internal\sys\winows</Filter>
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sspi.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\subauth.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\w32api.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winbase.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincon.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincrypt.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\windef.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winerror.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winnt.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winsock2.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winuser.d">
+      <Filter>third_party\urt\src\urt\internal\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\traits.d">
-      <Filter>third_party\urt\internal</Filter>
+      <Filter>third_party\urt\src\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\intrinsic\package.d">
+      <Filter>third_party\urt\src\urt\intrinsic</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d">
+      <Filter>third_party\urt\src\urt\intrinsic</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\io.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\kvp.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\lifetime.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\list.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\log.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\map.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\math.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\alloc.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\bitmap.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\freelist.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\package.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\page.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\pagepool.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\pagepool_tiny.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\pressure.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\profile\common.d">
+      <Filter>third_party\urt\src\urt\mem\profile</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\profile\log.d">
+      <Filter>third_party\urt\src\urt\mem\profile</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\profile\package.d">
+      <Filter>third_party\urt\src\urt\mem\profile</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\profile\record.d">
+      <Filter>third_party\urt\src\urt\mem\profile</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\reclaim.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\refman.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\region.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\ring.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\temp.d">
+      <Filter>third_party\urt\src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d">
+      <Filter>third_party\urt\src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\nullable.d">
+      <Filter>third_party\urt\src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\package.d">
+      <Filter>third_party\urt\src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\tuple.d">
+      <Filter>third_party\urt\src\urt\meta</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\package.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\platform.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\processor.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\rand.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\range\package.d">
+      <Filter>third_party\urt\src\urt\range</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\range\primitives.d">
+      <Filter>third_party\urt\src\urt\range</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\result.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\serial.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\package.d">
+      <Filter>third_party\urt\src\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\quantity.d">
+      <Filter>third_party\urt\src\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\unit.d">
+      <Filter>third_party\urt\src\urt\si</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\socket.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\ansi.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\ascii.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\format.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\package.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\regex.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\string.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\tailstring.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\uni.d">
+      <Filter>third_party\urt\src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\critical.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\event.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mpmc.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mpsc.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mutex.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\semaphore.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\spinlock.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\spsc.d">
+      <Filter>third_party\urt\src\urt\sync</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\system.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\thread.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\time.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\traits.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\util.d">
-      <Filter>third_party\urt</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\uuid.d">
-      <Filter>third_party\urt</Filter>
+    <DCompile Include="third_party\urt\src\urt\typeops.d">
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\typereg.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\util.d">
+      <Filter>third_party\urt\src\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\uuid.d">
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\variant.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\zip.d">
-      <Filter>third_party\urt</Filter>
+      <Filter>third_party\urt\src\urt</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include=".gitignore" />
-    <None Include=".editorconfig" />
-    <None Include="conf\startup.conf">
-      <Filter>conf</Filter>
-    </None>
-    <None Include="conf\goodwe_profiles\gwxx48es.conf">
-      <Filter>conf\goodwe_profiles</Filter>
-    </None>
-    <None Include="conf\ha_profiles\emporia.conf">
-      <Filter>conf\ha_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\eastron_sdm120.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\eastron_sdm630.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\gm1000.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\goodwe_ems.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\pace_bms.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\se_meter.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\shelly.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\smartevse.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\tac1100.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\mqtt_profiles\open_beken.conf">
-      <Filter>conf\mqtt_profiles</Filter>
-    </None>
-    <None Include="conf\rest_profiles\smartevse.conf">
-      <Filter>conf\rest_profiles</Filter>
-    </None>
-    <None Include="conf\zigbee_profiles\zigbee.conf">
-      <Filter>conf\zigbee_profiles</Filter>
-    </None>
-    <None Include="docs\CLI.md">
-      <Filter>docs</Filter>
-    </None>
-    <None Include="docs\COMPONENT_TEMPLATES.md">
-      <Filter>docs</Filter>
-    </None>
-    <None Include="docs\FEATURES.md">
-      <Filter>docs</Filter>
-    </None>
-    <None Include="docs\OVERVIEW.md">
-      <Filter>docs</Filter>
-    </None>
-    <None Include="Makefile" />
-    <None Include="src\protocol\esphome\api.proto">
-      <Filter>src\protocol\esphome</Filter>
-    </None>
-    <None Include="src\protocol\tesla\commands.proto">
-      <Filter>src\protocol\tesla</Filter>
-    </None>
-    <None Include="src\protocol\tesla\messages.proto">
-      <Filter>src\protocol\tesla</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\bl808\start.S">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\bl808_m0\start.S">
-      <Filter>third_party\urt\driver\bl808_m0</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\bk7231\start.S">
-      <Filter>third_party\urt\driver\bk7231</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\bl618\start.S">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\rp2350\boot2.S">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\rp2350\start.S">
-      <Filter>third_party\urt\driver\rp2350</Filter>
-    </None>
-    <None Include="third_party\urt\src\urt\driver\stm32\start.S">
-      <Filter>third_party\urt\driver\stm32</Filter>
-    </None>
+    <ClCompile Include="third_party\urt\src\urt\driver\esp32\main.c">
+      <Filter>third_party\urt\src\urt\driver\esp32</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h">
@@ -1789,13 +2083,13 @@
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\Packet32.h">
       <Filter>third_party\npcap-sdk-1.15\Include</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap.h">
-      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
-    </ClInclude>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-bpf.h">
       <Filter>third_party\npcap-sdk-1.15\Include</Filter>
     </ClInclude>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-namedb.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap.h">
       <Filter>third_party\npcap-sdk-1.15\Include</Filter>
     </ClInclude>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\bluetooth.h">
@@ -1825,10 +2119,10 @@
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\nflog.h">
       <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap.h">
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap-inttypes.h">
       <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
     </ClInclude>
-    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap-inttypes.h">
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap.h">
       <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
     </ClInclude>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\sll.h">
@@ -1845,14 +2139,47 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="third_party\urt\src\urt\driver\bl808\hbn_ram.c">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </ClCompile>
-    <ClCompile Include="third_party\urt\src\urt\driver\esp32\main.c">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </ClCompile>
-    <ClCompile Include="third_party\urt\src\urt\driver\esp32\ow_shim.c">
-      <Filter>third_party\urt\driver\esp32</Filter>
-    </ClCompile>
+    <None Include=".editorconfig" />
+    <None Include=".gitignore" />
+    <None Include="conf\startup.conf">
+      <Filter>conf</Filter>
+    </None>
+    <None Include="docs\CLI.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\COMPONENT_TEMPLATES.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\FEATURES.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\OVERVIEW.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="Makefile" />
+    <None Include="src\protocol\esphome\api.proto">
+      <Filter>src\protocol\esphome</Filter>
+    </None>
+    <None Include="src\protocol\tesla\commands.proto">
+      <Filter>src\protocol\tesla</Filter>
+    </None>
+    <None Include="src\protocol\tesla\messages.proto">
+      <Filter>src\protocol\tesla</Filter>
+    </None>
+    <None Include="third_party\urt\src\urt\driver\bk7231\start.S">
+      <Filter>third_party\urt\src\urt\driver\bk7231</Filter>
+    </None>
+    <None Include="third_party\urt\src\urt\driver\bl618\start.S">
+      <Filter>third_party\urt\src\urt\driver\bl618</Filter>
+    </None>
+    <None Include="third_party\urt\src\urt\driver\bl808_m0\start.S">
+      <Filter>third_party\urt\src\urt\driver\bl808_m0</Filter>
+    </None>
+    <None Include="third_party\urt\src\urt\driver\rp2350\start.S">
+      <Filter>third_party\urt\src\urt\driver\rp2350</Filter>
+    </None>
+    <None Include="third_party\urt\src\urt\driver\stm32\start.S">
+      <Filter>third_party\urt\src\urt\driver\stm32</Filter>
+    </None>
   </ItemGroup>
 </Project>
