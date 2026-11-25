@@ -353,6 +353,7 @@ private:
     enum Duration tick_interval = 400.msecs;
     enum Duration takeover_silence = 15.seconds;
     enum Duration echo_grace = 2.seconds;
+    enum ubyte presence_heartbeats = 20;
 
     enum BusRole : ubyte
     {
@@ -413,10 +414,10 @@ private:
         _collision = false;
     }
 
-    void release_bindings()
+    void release_bindings(ushort slave_id = 0)
     {
         foreach (binding; Collection!TeslaTWCBinding().values)
-            if (!binding.is_remote && binding.master is this && (binding.flags & ObjectFlags.dynamic))
+            if (!binding.is_remote && binding.master is this && (binding.flags & ObjectFlags.dynamic) && (!slave_id || binding.slave_id == slave_id))
                 binding.destroy();
     }
 
@@ -444,12 +445,30 @@ private:
         return c;
     }
 
+    void evict(Charger* c)
+    {
+        log.info("charger '", c.name[], "' left the bus");
+        release_bindings(c.id);
+        ptrdiff_t index = c - &_chargers[0];
+        _chargers.remove(index);
+        if (_round_robin_index > index)
+            --_round_robin_index;
+        if (_round_robin_index >= _chargers.length)
+            _round_robin_index = 0;
+        rebalance();
+    }
+
     void spawn_binding(ref Charger c)
     {
         foreach (binding; Collection!TeslaTWCBinding().values)
         {
             if (binding.master is this && binding.slave_id == c.id)
+            {
+                // a user's binding orphaned by an eviction must adopt the rediscovered record
+                if (binding.running && !c.binding)
+                    binding.restart();
                 return;
+            }
         }
 
         c.name = Collection!TeslaTWCBinding().generate_name(c.name[]).make_string();
@@ -539,7 +558,11 @@ private:
         if (!running)
             return;
         g_app.schedule(scheduled + tick_interval, &tick);
+        service_bus(scheduled);
+    }
 
+    void service_bus(MonoTime scheduled)
+    {
         BaseInterface i = _iface.get;
         if (!i || i.status.link_status != LinkStatus.up)
             return;
@@ -572,6 +595,12 @@ private:
         if (_round_robin_index >= _chargers.length)
             _round_robin_index = 0;
 
+        if (c.heartbeat_sent - c.heartbeat_received >= presence_heartbeats)
+        {
+            evict(c);
+            return;
+        }
+
         if (c.heartbeat_received != c.heartbeat_sent)
             c.req_seq = 0; // send heartbeats until the device responds
 
@@ -581,14 +610,6 @@ private:
 
         if ((c.req_seq & 1) == 0)
         {
-            if (c.heartbeat_sent - c.heartbeat_received >= 20)
-            {
-                debug writeDebug("Charger ", c.name, " not responding");
-                c.heartbeat_sent = 0;
-                c.heartbeat_received = 0;
-                c.req_seq = 0;
-            }
-
             version (DebugTWCMaster)
                 writeDebugf("Charger {0}({1,04x}) - SN: {2}\n   {3}/{4}/{5}V  {6}A({7}A)  {8}W - {9}\n   VIN {10}", c.name, c.id, c.serial_number[], c.voltage1, c.voltage2, c.voltage3, cast(float)c.current/100, cast(float)c.offered_current / 100, c.total_power, c.charger_state(), c.vin[]);
 
@@ -1139,4 +1160,67 @@ unittest
         }
         assert(total <= budget);
     }
+
+    static class UserBinding : TeslaTWCBinding
+    {
+    nothrow @nogc:
+
+        ~this() {}
+        this(CID id) { super(id); }
+        void start() { set_state(State.running); }
+        override CompletionStatus startup() => CompletionStatus.continue_;
+        override CompletionStatus shutdown() => CompletionStatus.complete;
+    }
+
+    TestMaster fleet = alloc!TestMaster(Collection!TeslaTWCMaster().allocate_id("twc-review-fleet"));
+    Collection!TeslaTWCMaster().add(fleet);
+    scope(exit) fleet.destroy();
+    fleet.iface = iface;
+    fleet.start();
+    fleet.set_role(TeslaTWCMaster.BusRole.active);
+    assert(iface.link_up);
+    TeslaTWCMaster.Charger* present = fleet.discover(0x31);
+    present.device_max_current = 3200;
+    present.offered_current = 1000;
+    present.reserved_current = 1000;
+    present.charge_current_target = 1000;
+    present.flags = 1;
+    fleet.discover(0x32).device_max_current = 3200;
+    fleet.rebalance();
+    assert(Collection!TeslaTWCBinding().get("twc_0032"));
+    assert(fleet.next_offer(*fleet.find_charger(0x31)) == 1000);
+
+    message[0..2] = ushort(0xFDE0).nativeToBigEndian;
+    message[2..4] = ushort(0x31).nativeToBigEndian;
+    message[4..6] = fleet._id_on_bus.nativeToBigEndian;
+    message[6] = TWCState.Charging;
+    message[7..9] = ushort(1000).nativeToBigEndian;
+    message[9..11] = ushort(1000).nativeToBigEndian;
+    uint visits;
+    while (fleet.find_charger(0x32))
+    {
+        assert(++visits <= 2 * TeslaTWCMaster.presence_heartbeats + 2);
+        fleet.service_bus(getTime());
+        ref TWCFrame reply = packet.init!TWCFrame(message[]);
+        reply.src = 0x31;
+        reply.dst = fleet._id_on_bus;
+        fleet.incoming_packet(&packet.packet, iface, PacketDirection.incoming, null);
+    }
+    assert(visits >= 2 * TeslaTWCMaster.presence_heartbeats);
+    assert(Collection!TeslaTWCBinding().get("twc_0032") is null);
+    assert(Collection!TeslaTWCBinding().get("twc_0031"));
+    assert(fleet._chargers.length == 1 && fleet.find_charger(0x31).allocation == 3200);
+    assert(fleet.next_offer(*fleet.find_charger(0x31)) == 3200);
+
+    UserBinding user = alloc!UserBinding(Collection!TeslaTWCBinding().allocate_id("twc-review-user"));
+    Collection!TeslaTWCBinding().add(user);
+    scope(exit) user.destroy();
+    user.master = fleet;
+    user.slave_id = 0x33;
+    user.start();
+    fleet.adopt(0x33, user);
+    fleet.evict(fleet.find_charger(0x33));
+    assert(Collection!TeslaTWCBinding().get("twc-review-user") is user && user.running);
+    fleet.discover(0x33);
+    assert(!user.running);
 }
