@@ -991,3 +991,20 @@ nothrow @nogc:
         g_app.console.register_collection!BuiltinBLEInterface();
     }
 }
+
+
+unittest
+{
+    create_application();
+    BuiltinBLEInterface discovered = Collection!BuiltinBLEInterface().get("ble1");
+    assert(discovered && (discovered.flags & ObjectFlags.dynamic));
+    assert(discovered.name("ble-renamed") is null);
+    assert(Collection!BuiltinBLEInterface().create("ble1") !is null);
+    shutdown_application();
+
+    create_application();
+    scope(exit) shutdown_application();
+    BuiltinBLEInterface builtin = Collection!BuiltinBLEInterface().get("ble1");
+    assert(builtin && (builtin.flags & ObjectFlags.dynamic));
+    assert(Collection!BuiltinBLEInterface().get("ble-renamed") is null);
+}

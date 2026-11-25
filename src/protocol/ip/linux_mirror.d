@@ -58,6 +58,11 @@ void mirror_init()
     register_object_lifecycle_handler(&g_mirror.on_object_lifecycle);
 }
 
+void mirror_deinit()
+{
+    unregister_object_lifecycle_handler(&g_mirror.on_object_lifecycle);
+}
+
 void mirror_drain()
 {
     g_mirror.drain();

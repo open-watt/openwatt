@@ -64,6 +64,15 @@ nothrow @nogc:
         aa55_socket = socket;
     }
 
+    override void deinit()
+    {
+        if (aa55_socket)
+        {
+            aa55_socket.close();
+            aa55_socket = Socket.invalid;
+        }
+    }
+
     uint element_size(uint)
         => cast(uint)ElementDesc_AA55.sizeof;
 

@@ -277,6 +277,11 @@ nothrow @nogc:
         g_app.console.register_collection!LinuxRawEthernet();
     }
 
+    override void deinit()
+    {
+        unsubscribe_link_changed(&on_link_changed);
+    }
+
 private:
 
     void on_link_changed(uint, const(char)[], bool, bool)
