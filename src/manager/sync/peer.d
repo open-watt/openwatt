@@ -467,7 +467,7 @@ nothrow @nogc:
             return;
 
         SyncEncoder enc = encoder_for(_encoder);
-        LogModule logs = get_module!LogModule;
+        LogModule* logs = get_module!LogModule;
         if (uint lost = logs.lost(_log_consumer))
         {
             if (enc.encode_log(this, format_log_loss(lost), true))

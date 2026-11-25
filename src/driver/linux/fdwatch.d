@@ -30,12 +30,12 @@ void fd_watch_changed()
 }
 
 
-final class LinuxFdWatchModule : Module
+struct LinuxFdWatchModule
 {
-    mixin DeclareModule!"os.fdwatch";
+    mixin DeclareStaticModule!"os.fdwatch";
 nothrow @nogc:
 
-    override void deinit()
+    static void deinit()
     {
         g_fdwatch.stop();
     }

@@ -371,12 +371,13 @@ private:
 }
 
 
-final class SerialStreamModule : Module
+struct SerialStreamModule
 {
-    mixin DeclareModule!"stream.serial";
+    mixin DeclareStaticModule!"stream.serial";
+    static __gshared SerialStreamModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.register_enum!StopBits();
         g_app.register_enum!Parity();
@@ -384,8 +385,8 @@ nothrow @nogc:
 
         g_app.console.register_collection!SerialStream();
         SerialStream._doorbell = register_doorbell(&SerialStream.sweep, EventPriority.bulk);
-        g_app.console.register_command!(serial_lines, "lines")("/stream/serial", this);
-        g_app.console.register_command!(serial_devices, "devices")("/stream/serial", this);
+        g_app.console.register_command!(serial_lines, "lines")("/stream/serial", &this);
+        g_app.console.register_command!(serial_devices, "devices")("/stream/serial", &this);
         version (Embedded) {} else
             sync_ports(getTime());
     }

@@ -20,12 +20,12 @@ import router.stream;
 nothrow @nogc:
 
 
-final class EZSPProtocolModule : Module
+struct EZSPProtocolModule
 {
-    mixin DeclareModule!"protocol.ezsp";
+    mixin DeclareStaticModule!"protocol.ezsp";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!EZSPStackType();
 
@@ -33,7 +33,7 @@ nothrow @nogc:
         g_app.console.register_collection!EZSPClient();
     }
 
-    override void update()
+    static void update()
     {
         Collection!EZSPClient().update_all();
     }

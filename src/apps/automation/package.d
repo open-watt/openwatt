@@ -14,18 +14,19 @@ public import apps.automation.automation;
 nothrow @nogc:
 
 
-final class AutomationModule : Module
+struct AutomationModule
 {
-    mixin DeclareModule!"automation";
+    mixin DeclareStaticModule!"automation";
+    static __gshared AutomationModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.register_enum!Edge();
         g_app.console.register_collection!Automation();
     }
 
-    override void update()
+    void update()
     {
         Collection!Automation().update_all();
     }

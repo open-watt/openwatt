@@ -210,22 +210,26 @@ private:
     ElementDesc* _element;
 }
 
-interface ProfileSections
+struct ProfileSections
 {
-nothrow @nogc:
-    uint element_size(uint kind);
-    void count_element(uint kind, ref const ConfItem item, ref ProfileSize size);
-    // slot is element_size bytes; the handler emplaces its own struct's init before filling
-    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
+    uint delegate(uint) nothrow @nogc element_size;
+    void delegate(uint, ref const ConfItem, ref ProfileSize) nothrow @nogc count_element;
+    // The handler emplaces its own struct's init in an element_size-byte slot before filling it.
+    bool delegate(uint, ref const ConfItem, void[], ref ProfileBuilder) nothrow @nogc parse_element;
 }
 
-interface ProfileRootSections
+struct ProfileRootSections
 {
-nothrow @nogc:
-    uint size_root(uint kind, ref const ConfItem item, ref ProfileSize size);
-    // slot has the byte count returned by size_root and belongs to this parsed Profile
-    bool parse_root(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
+    uint delegate(uint, ref const ConfItem, ref ProfileSize) nothrow @nogc size_root;
+    // The slot has the byte count returned by size_root and belongs to this parsed Profile.
+    bool delegate(uint, ref const ConfItem, void[], ref ProfileBuilder) nothrow @nogc parse_root;
 }
+
+uint register_profile_section(T)(const(char)[] name, T handler)
+    => register_profile_section(name, ProfileSections(&handler.element_size, &handler.count_element, &handler.parse_element));
+
+uint register_profile_root_section(T)(const(char)[] name, T handler)
+    => register_profile_root_section(name, ProfileRootSections(&handler.size_root, &handler.parse_root));
 
 enum uint first_section_kind = 16;
 
@@ -761,7 +765,7 @@ unittest
             ubyte length;
             ushort desc = 0xFFFF;
         }
-        static class TestSections : ProfileSections
+        static class TestSections
         {
         nothrow @nogc:
             uint element_size(uint)
@@ -785,7 +789,7 @@ unittest
             ushort first;
             ushort second;
         }
-        static class TestRoots : ProfileRootSections
+        static class TestRoots
         {
         nothrow @nogc:
             uint size_root(uint, ref const ConfItem item, ref ProfileSize size)

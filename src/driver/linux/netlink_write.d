@@ -333,16 +333,17 @@ int netlink_ifindex(const(char)[] name)
 
 // === console-facing module ===
 
-final class LinuxNetlinkWriteModule : Module
+struct LinuxNetlinkWriteModule
 {
-    mixin DeclareModule!"os.netlink.write";
+    mixin DeclareStaticModule!"os.netlink.write";
+    static __gshared LinuxNetlinkWriteModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
-        g_app.console.register_command!(add_route, "add-route")("/system/netlink", this);
-        g_app.console.register_command!(add_neighbour, "add-neighbour")("/system/netlink", this);
-        g_app.console.register_command!(del_neighbour, "del-neighbour")("/system/netlink", this);
+        g_app.console.register_command!(add_route, "add-route")("/system/netlink", &this);
+        g_app.console.register_command!(add_neighbour, "add-neighbour")("/system/netlink", &this);
+        g_app.console.register_command!(del_neighbour, "del-neighbour")("/system/netlink", &this);
     }
 
     // /system/netlink/add-route destination=<address[/prefix]> gateway=<address>

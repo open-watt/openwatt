@@ -46,18 +46,19 @@ static if (has_ip)
 nothrow @nogc:
 
 
-final class LinuxBridgeOffloadModule : Module
+struct LinuxBridgeOffloadModule
 {
-    mixin DeclareModule!"interface.bridge.linux";
+    mixin DeclareStaticModule!"interface.bridge.linux";
+    static __gshared LinuxBridgeOffloadModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         register_object_state_handler(&on_object_state);
         register_bridge_offload_hooks(&on_ports_changed, &on_cpu_promisc_changed);
     }
 
-    override void update()
+    void update()
     {
         foreach (o; _offloads[])
         {

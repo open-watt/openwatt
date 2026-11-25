@@ -763,7 +763,7 @@ The REPL method enables true interactive investigation: send a command, analyze 
 
 1. Create module in `src/protocol/yourprotocol/`
 2. Implement client/server classes inheriting from appropriate base
-3. Create Module class with `DeclareModule!("yourprotocol")`
+3. Create a module struct with `mixin DeclareStaticModule!"yourprotocol";`
 4. Register collections in `init()`
 5. Add to [src/manager/plugin.d](src/manager/plugin.d) module registration
 6. If needed, create corresponding interface in `src/router/iface/`

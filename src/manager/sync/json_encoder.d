@@ -41,9 +41,9 @@ nothrow @nogc:
 
     alias log = Log!"sync.json";
 
-    SyncModule sync;
+    SyncModule* sync;
 
-    this(SyncModule sync)
+    this(SyncModule* sync)
     {
         this.sync = sync;
     }

@@ -330,12 +330,8 @@ void shutdown_application()
     }
 }
 
-Mod get_module(Mod)()
-    if (is(Mod : Module))
-{
-    return cast(Mod)cast(void*)legacy_instance!Mod.instance;
-}
-
+Mod* get_module(Mod)()
+    => &Mod.module_state;
 
 // Handle for an `element:` signal subscription owned by the Application.
 private final class ElementSignalSub : SignalSub
@@ -346,7 +342,7 @@ nothrow @nogc:
     Element* element;
 
     override ISignalProvider provider()
-        => g_app;
+        => signal_provider(g_app);
 
     final void on_change(ref const SampleUpdate update)
     {
@@ -358,7 +354,7 @@ nothrow @nogc:
     }
 }
 
-final class Application : ISignalProvider
+final class Application
 {
 nothrow @nogc:
 
@@ -425,7 +421,7 @@ nothrow @nogc:
         register_bitfield!ObjectFlags();
         register_enum!HashFunction();
 
-        register_signal_provider(StringLit!"element", this);
+        register_signal_provider(StringLit!"element", signal_provider(this));
 
         register_intrinsic(StringLit!"select", &select);
         register_intrinsic(StringLit!"to_int", &to_int);
@@ -514,10 +510,6 @@ nothrow @nogc:
 
         import manager.sample.codec : register_builtin_encodings;
         register_builtin_encodings();
-
-        foreach (ref m; registrations)
-            if (m.construct)
-                m.construct(this);
 
         run_module_phase(ModulePhase.pre_init);
 
@@ -723,7 +715,7 @@ nothrow @nogc:
     {
         if (ISignalProvider* p = scheme in signal_providers)
             return *p;
-        return null;
+        return ISignalProvider.init;
     }
 
     // The Application is the built-in `element:` signal provider (the `@` sentinel maps to it).

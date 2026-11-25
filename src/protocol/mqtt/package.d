@@ -22,14 +22,15 @@ import protocol.mqtt.topic : validate_topic_name;
 nothrow @nogc:
 
 
-final class MQTTModule : Module, ProfileSections, ProfileRootSections
+struct MQTTModule
 {
-    mixin DeclareModule!"protocol.mqtt";
+    mixin DeclareStaticModule!"protocol.mqtt";
+    static __gshared MQTTModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
-        register_profile_handlers(this);
+        register_profile_handlers(&this);
 
         g_app.register_enum!ProtocolLevel();
 
@@ -37,15 +38,15 @@ nothrow @nogc:
         g_app.console.register_collection!MQTTClient();
         g_app.console.register_collection!MQTTBinding();
 
-        g_app.console.register_command!(retained, "retained")("/protocol/mqtt/broker", this);
+        g_app.console.register_command!(retained, "retained")("/protocol/mqtt/broker", &this);
         static if (has_message_cache)
-            g_app.console.register_command!(cache, "cache")("/protocol/mqtt/broker", this);
-        g_app.console.register_command!(read, "read")("/protocol/mqtt/broker", this);
-        g_app.console.register_command!(sessions, "sessions")("/protocol/mqtt/broker", this);
-        g_app.console.register_command!(subscriptions, "subscriptions")("/protocol/mqtt/broker", this);
-        g_app.console.register_command!(local_publish, "publish")("/protocol/mqtt/broker", this);
+            g_app.console.register_command!(cache, "cache")("/protocol/mqtt/broker", &this);
+        g_app.console.register_command!(read, "read")("/protocol/mqtt/broker", &this);
+        g_app.console.register_command!(sessions, "sessions")("/protocol/mqtt/broker", &this);
+        g_app.console.register_command!(subscriptions, "subscriptions")("/protocol/mqtt/broker", &this);
+        g_app.console.register_command!(local_publish, "publish")("/protocol/mqtt/broker", &this);
 
-        g_app.console.register_command!(client_publish, "publish")("/protocol/mqtt/client", this);
+        g_app.console.register_command!(client_publish, "publish")("/protocol/mqtt/client", &this);
 
         static if (has_message_cache)
         {
@@ -54,7 +55,7 @@ nothrow @nogc:
         }
     }
 
-    override void deinit()
+    void deinit()
     {
         static if (has_message_cache)
         {
@@ -246,7 +247,7 @@ nothrow @nogc:
         session.write_line(retain_value ? "Published retained MQTT message via client" : "Published MQTT message via client");
     }
 
-    override void update()
+    void update()
     {
         Collection!MQTTBroker().update_all();
         Collection!MQTTClient().update_all();
@@ -324,7 +325,7 @@ unittest
     import manager.sample : desc_by_index;
     import manager.series : ValueType;
 
-    MQTTModule module_ = alloc!MQTTModule(null);
+    MQTTModule* module_ = alloc!MQTTModule();
     register_profile_handlers(module_);
 
     static immutable string conf =
@@ -366,7 +367,7 @@ unittest
 
 private:
 
-void register_profile_handlers(MQTTModule module_)
+void register_profile_handlers(MQTTModule* module_)
 {
     if (!mqtt_section_kind)
         mqtt_section_kind = register_profile_section("mqtt", module_);

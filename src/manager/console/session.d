@@ -1593,12 +1593,12 @@ private:
 }
 
 
-final class ConsoleSessionModule : Module
+struct ConsoleSessionModule
 {
-    mixin DeclareModule!"console.session";
+    mixin DeclareStaticModule!"console.session";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!TerminalProfile();
         g_app.console.register_collection!Session();
@@ -1607,18 +1607,18 @@ nothrow @nogc:
         debug assert(registered, "console history reclaimer registration failed");
     }
 
-    override void deinit()
+    static void deinit()
     {
         unregister_reclaimer(&reclaim_history);
     }
 
-    override void update()
+    static void update()
     {
         Collection!Session().update_all();
     }
 
 private:
-    ReclaimResult reclaim_history(size_t bytes_needed)
+    static ReclaimResult reclaim_history(size_t bytes_needed)
     {
         foreach (session; Collection!Session().values)
         {

@@ -523,19 +523,20 @@ private:
 }
 
 
-final class APIModule : Module
+struct APIModule
 {
-    mixin DeclareModule!"apps.api";
+    mixin DeclareStaticModule!"apps.api";
+    static __gshared APIModule module_state;
 nothrow @nogc:
 
     Map!(String, APIHandler) _custom_handlers;
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!APIManager();
     }
 
-    override void update()
+    void update()
     {
         Collection!APIManager().update_all();
     }

@@ -27,12 +27,13 @@ static if (has_tesla_vehicle)
 nothrow @nogc:
 
 
-final class TeslaProtocolModule : Module
+struct TeslaProtocolModule
 {
-    mixin DeclareModule!"protocol.tesla";
+    mixin DeclareStaticModule!"protocol.tesla";
+    static __gshared TeslaProtocolModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         register_packet_codec!TWCFrame();
         g_app.register_enum!(TeslaTWCMaster.ChargerState)();
@@ -51,21 +52,21 @@ nothrow @nogc:
             version (Tiny) {}
             else
             {
-                g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_charge_stop, "charge-stop")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_set_amps, "set-amps")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_climate, "climate")("/protocol/tesla/session", this);
-                g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", this);
+                g_app.console.register_command!(vehicle_get_charge, "get-charge")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_get_climate, "get-climate")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_charge_start, "charge-start")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_charge_stop, "charge-stop")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_set_amps, "set-amps")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_climate, "climate")("/protocol/tesla/session", &this);
+                g_app.console.register_command!(vehicle_set_temperature, "set-temperature")("/protocol/tesla/session", &this);
             }
-            g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", this);
-            g_app.console.register_command!(vehicle_backoff, "backoff")("/protocol/tesla/vehicle-scanner", this);
-            g_app.console.register_command!(vehicle_reset_backoff, "reset-backoff")("/protocol/tesla/vehicle-scanner", this);
+            g_app.console.register_command!(vehicle_schedule_charging, "schedule-charging")("/protocol/tesla/session", &this);
+            g_app.console.register_command!(vehicle_backoff, "backoff")("/protocol/tesla/vehicle-scanner", &this);
+            g_app.console.register_command!(vehicle_reset_backoff, "reset-backoff")("/protocol/tesla/vehicle-scanner", &this);
         }
     }
 
-    override void update()
+    void update()
     {
         Collection!TeslaTWCMaster().update_all();
 

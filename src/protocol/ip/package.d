@@ -2135,9 +2135,10 @@ private:
 }
 
 
-final class IPModule : Module
+struct IPModule
 {
-    mixin DeclareModule!"protocol.ip";
+    mixin DeclareStaticModule!"protocol.ip";
+    static __gshared IPModule module_state;
 nothrow @nogc:
 
     version (UseInternalIPStack)
@@ -2145,7 +2146,7 @@ nothrow @nogc:
     ref IPStack stack() return
         => _stack;
 
-    override void pre_init()
+    void pre_init()
     {
         version (UseInternalIPStack)
         {
@@ -2155,7 +2156,7 @@ nothrow @nogc:
         }
     }
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!IPAddress();
         g_app.console.register_collection!IPPool();
@@ -2192,16 +2193,16 @@ nothrow @nogc:
             set_ether_tcp_input(&ether_tcp_input);
 
             import protocol.ip.tcp : tcp_print;
-            g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", this);
-            g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
+            g_app.console.register_command!(tcp_print, "print")("/protocol/ip/tcp", &this);
+            g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", &this);
             static if (has_ipv6)
-                g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
+                g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", &this);
         }
         else version (Windows)
             load_socket_extensions();
     }
 
-    override void deinit()
+    void deinit()
     {
         version (UseInternalIPStack)
         {
@@ -2641,7 +2642,7 @@ nothrow @nogc:
         });
     }
 
-    override void update()
+    void update()
     {
         pump_ip_endpoints();
 

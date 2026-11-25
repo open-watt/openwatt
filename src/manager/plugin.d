@@ -1,59 +1,8 @@
 module manager.plugin;
 
-import urt.log : Log;
-import urt.mem;
-import urt.string;
-
-import manager;
-import manager.config : ConfItem;
 import manager.features;
 
 nothrow:
-
-
-class Module
-{
-nothrow @nogc:
-
-    alias log = Log!module_name;
-
-    String module_name;
-
-    void pre_init()
-    {
-    }
-
-    void init()
-    {
-    }
-
-    void post_init()
-    {
-    }
-
-    void deinit()
-    {
-    }
-
-    void pre_update()
-    {
-    }
-
-    void update()
-    {
-    }
-
-    void post_update()
-    {
-    }
-
-protected:
-    this(Application app, String name)
-    {
-        import urt.lifetime : move;
-        this.module_name = name.move;
-    }
-}
 
 enum ModulePhase : ubyte
 {
@@ -65,6 +14,7 @@ enum ModulePhase : ubyte
     update,
     post_update,
 }
+
 alias ModuleHook = void function() nothrow @nogc;
 
 struct ModuleRegistration
@@ -72,7 +22,6 @@ struct ModuleRegistration
     string name;
     void* state;
     ModuleHook[ModulePhase.max + 1] hooks;
-    void function(Application) nothrow @nogc construct;
 
     void run(ModulePhase phase) const nothrow @nogc
     {
@@ -98,37 +47,9 @@ mixin template DeclareStaticModule(string name)
 {
     enum string ModuleName = name;
     enum is_static_module = true;
+    import urt.log : Log;
+    alias log = Log!name;
 }
-
-template legacy_instance(T)
-{
-    __gshared LegacyModuleState legacy_instance;
-}
-
-struct LegacyModuleState
-{
-    Module instance;
-
-    void invoke(string phase)() nothrow @nogc
-    {
-        __traits(getMember, instance, phase)();
-    }
-}
-
-// helper template to register a plugin
-mixin template DeclareModule(string name)
-{
-    import manager : Application;
-    import urt.string : StringLit;
-
-    enum string ModuleName = name;
-
-    this(Application app) nothrow @nogc
-    {
-        super(app, StringLit!ModuleName);
-    }
-}
-
 
 __gshared const(ModuleRegistration[]) registrations = collect_modules();
 
@@ -364,13 +285,7 @@ ModuleRegistration[] collect_module(alias mod)()
     ModuleRegistration[] result;
     static foreach (m; __traits(allMembers, mod))
     {{
-        static if (is(__traits(getMember, mod, m) : Module))
-        {
-            alias T = __traits(getMember, mod, m);
-            static if (__traits(hasMember, T, "ModuleName"))
-                result ~= describe_legacy_module!T();
-        }
-        else static if (is(__traits(getMember, mod, m) == struct))
+        static if (is(__traits(getMember, mod, m) == struct))
         {
             alias T = __traits(getMember, mod, m);
             static if (__traits(hasMember, T, "is_static_module"))
@@ -388,13 +303,13 @@ ModuleRegistration describe_static_module(T)()
     static if (stateful)
     {
         static assert(is(typeof(T.module_state) == T));
-        static assert(__traits(isZeroInit, T));
+        static assert(__traits(isZeroInit, T), T.stringof ~ " state must be zero-initialized");
         result.state = cast(void*)&T.module_state;
     }
 
     static foreach (phase; __traits(allMembers, ModulePhase))
     {{
-        static if (__traits(hasMember, T, phase))
+        static if (__traits(hasMember, T, phase) && __traits(compiles, &__traits(getMember, T, phase)))
         {
             alias hook = __traits(getMember, T, phase);
             static assert(__traits(isStaticFunction, hook) != stateful,
@@ -404,26 +319,6 @@ ModuleRegistration describe_static_module(T)()
     }}
     return result;
 }
-
-ModuleRegistration describe_legacy_module(T)()
-{
-    ModuleRegistration result;
-    result.name = T.ModuleName;
-    result.state = cast(void*)&legacy_instance!T;
-    result.construct = &construct_module!T;
-    static foreach (phase; __traits(allMembers, ModulePhase))
-    {
-        static if (__traits(hasMember, T, phase) && !is(__traits(parent, __traits(getMember, T, phase)) == Module))
-            result.hooks[__traits(getMember, ModulePhase, phase)] = &LegacyModuleState.invoke!phase;
-    }
-    return result;
-}
-
-void construct_module(T)(Application app) @nogc
-{
-    legacy_instance!T.instance = alloc!T(app);
-}
-
 
 unittest
 {

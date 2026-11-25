@@ -82,9 +82,9 @@ nothrow @nogc:
 
     alias log = Log!"sync.bin";
 
-    SyncModule sync;
+    SyncModule* sync;
 
-    this(SyncModule sync)
+    this(SyncModule* sync)
     {
         this.sync = sync;
     }

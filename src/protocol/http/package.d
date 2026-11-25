@@ -202,15 +202,16 @@ bool http_request(const(char)[] url,
 }
 
 
-final class HTTPModule : Module, ProfileSections, ProfileRootSections
+struct HTTPModule
 {
-    mixin DeclareModule!"http";
+    mixin DeclareStaticModule!"http";
+    static __gshared HTTPModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
-        http_section_kind = register_profile_section("http", this);
-        http_requests_kind = register_profile_root_section("requests", this);
+        http_section_kind = register_profile_section("http", &this);
+        http_requests_kind = register_profile_root_section("requests", &this);
 
         g_app.register_enum!HTTPMethod();
         g_app.register_enum!FileServerAccess();
@@ -226,7 +227,7 @@ nothrow @nogc:
             g_app.console.register_collection!HTTPClientBinding();
 
         static if (has_http_client)
-            g_app.console.register_command!request("/protocol/http", this);
+            g_app.console.register_command!request("/protocol/http", &this);
     }
 
     uint element_size(uint)
@@ -425,7 +426,7 @@ nothrow @nogc:
         return true;
     }
 
-    override void update()
+    void update()
     {
         Collection!HTTPServer().update_all();
         static if (has_http_client)
@@ -606,7 +607,7 @@ unittest
     import urt.si.quantity : VarQuantity;
     import urt.si.unit : Ampere, ScaledUnit;
 
-    HTTPModule module_ = alloc!HTTPModule(null);
+    HTTPModule* module_ = alloc!HTTPModule();
     http_section_kind = register_profile_section("http", module_);
     http_requests_kind = register_profile_root_section("requests", module_);
 

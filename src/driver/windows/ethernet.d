@@ -167,31 +167,31 @@ private:
 // add/remove events through an SPSC ring; we just drain that ring each update.
 // ---------------------------------------------------------------------------
 
-final class WindowsPcapEthernetModule : Module
+struct WindowsPcapEthernetModule
 {
-    mixin DeclareModule!"ethernet.pcap";
+    mixin DeclareStaticModule!"ethernet.pcap";
 nothrow @nogc:
 
-    override void pre_init()
+    static void pre_init()
     {
         g_adapter_watcher.scan_sync();
         drain_events();
     }
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!WindowsPcapEthernet();
         g_adapter_watcher.start();
     }
 
-    override void update()
+    static void update()
     {
         drain_events();
     }
 
 private:
 
-    void drain_events()
+    static void drain_events()
     {
         // peek() returns a contiguous slice; if events wrap the ring boundary
         // we get the head portion this iteration and the wrapped portion next.
@@ -206,7 +206,7 @@ private:
         }
     }
 
-    void apply_event(ref const AdapterEvent ev)
+    static void apply_event(ref const AdapterEvent ev)
     {
         final switch (ev.kind) with (AdapterEventKind)
         {
@@ -235,7 +235,7 @@ private:
     }
 
     // Pick the lowest unused "etherN" name so removed slots get reused.
-    const(char)[] next_iface_name()
+    static const(char)[] next_iface_name()
     {
         for (int n = 1; n < 256; ++n)
         {

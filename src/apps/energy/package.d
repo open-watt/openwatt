@@ -40,9 +40,10 @@ nothrow @nogc:
 
 
 
-final class EnergyAppModule : Module
+struct EnergyAppModule
 {
-    mixin DeclareModule!"apps.energy";
+    mixin DeclareStaticModule!"apps.energy";
+    static __gshared EnergyAppModule module_state;
 nothrow @nogc:
 
     private EnergyApp _instance;
@@ -68,7 +69,7 @@ nothrow @nogc:
     ref MonoTime last_topology_rebuild()
         => _instance.last_topology_rebuild;
 
-    override void init()
+    void init()
     {
         g_app.register_enum!BusType();
         g_app.register_enum!Coverage();
@@ -79,12 +80,12 @@ nothrow @nogc:
         g_app.console.register_collection!EnergyLink();
         g_app.console.register_collection!Policy();
 
-        g_app.console.register_command!(start, "start")("/apps/energy", this);
-        g_app.console.register_command!(topology_print, "topology")("/apps/energy", this);
-        g_app.console.register_command!(circuit_print, "circuit")("/apps/energy", this);
-        g_app.console.register_command!(control_print, "control")("/apps/energy", this);
-        g_app.console.register_command!(why, "why")("/apps/energy", this);
-        g_app.console.register_command!(live, "live")("/apps/energy", this);
+        g_app.console.register_command!(start, "start")("/apps/energy", &this);
+        g_app.console.register_command!(topology_print, "topology")("/apps/energy", &this);
+        g_app.console.register_command!(circuit_print, "circuit")("/apps/energy", &this);
+        g_app.console.register_command!(control_print, "control")("/apps/energy", &this);
+        g_app.console.register_command!(why, "why")("/apps/energy", &this);
+        g_app.console.register_command!(live, "live")("/apps/energy", &this);
 
         register_device_lifecycle_handler(&on_device_lifecycle);
     }
@@ -136,7 +137,7 @@ nothrow @nogc:
         return false;
     }
 
-    override void update()
+    void update()
     {
         if (!started)
             return;
@@ -256,7 +257,7 @@ nothrow @nogc:
     {
         if (!require_started(session))
             return null;
-        return alloc!EnergyLiveView(session, this);
+        return alloc!EnergyLiveView(session, &this);
     }
 
     Table build_island_table()
@@ -480,7 +481,7 @@ nothrow @nogc:
         }
 
         if (watch)
-            return alloc!TopologyWatchState(session, this);
+            return alloc!TopologyWatchState(session, &this);
 
         Table table = build_topology_table(session);
         return print_table(session, table);
@@ -500,7 +501,7 @@ nothrow @nogc:
         }
 
         if (watch)
-            return alloc!CircuitWatchState(session, this);
+            return alloc!CircuitWatchState(session, &this);
 
         Table table = build_circuit_table(session);
         return print_table(session, table);
@@ -1242,7 +1243,7 @@ nothrow @nogc:
 
     ~this() {}
 
-    this(Session session, EnergyAppModule mod)
+    this(Session session, EnergyAppModule* mod)
     {
         super(session, null);
         _mod = mod;
@@ -1264,7 +1265,7 @@ nothrow @nogc:
 protected:
     abstract Table build_table();
 
-    EnergyAppModule _mod;
+    EnergyAppModule* _mod;
 
 private:
     size_t[Table.max_cols] _sticky_widths;
@@ -1278,7 +1279,7 @@ nothrow @nogc:
 
     ~this() {}
 
-    this(Session session, EnergyAppModule mod)
+    this(Session session, EnergyAppModule* mod)
     {
         super(session, mod);
     }
@@ -1307,7 +1308,7 @@ nothrow @nogc:
 
     ~this() {}
 
-    this(Session session, EnergyAppModule mod)
+    this(Session session, EnergyAppModule* mod)
     {
         super(session, mod);
     }
@@ -1335,7 +1336,7 @@ nothrow @nogc:
 
     ~this() {}
 
-    this(Session session, EnergyAppModule mod)
+    this(Session session, EnergyAppModule* mod)
     {
         super(session, mod);
     }

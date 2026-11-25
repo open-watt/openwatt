@@ -532,7 +532,7 @@ private:
 
         log.noticef("NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
 
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
 
         // if the network identity changed, purge old node data
         if (_previous_extended_pan_id != EUI64() && _previous_extended_pan_id != _network_params.extended_pan_id)
@@ -700,7 +700,7 @@ private:
         if (!running)
             return; // we are not handling events yet
 
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
         auto eui = EUI64(new_node_eui64);
 
         if (policy_decision == EmberJoinDecision.DENY_JOIN)
@@ -793,7 +793,7 @@ private:
         if (!running)
             return; // we are not handling events yet
 
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
         auto eui = EUI64(child_eui64);
 
         auto n = mod_zb.attach_node(eui, pan_id, child_id);

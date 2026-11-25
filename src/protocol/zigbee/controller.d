@@ -200,7 +200,7 @@ protected:
             return;
         }
 
-        ZigbeeProtocolModule zb = get_module!ZigbeeProtocolModule();
+        ZigbeeProtocolModule* zb = get_module!ZigbeeProtocolModule();
         MonoTime now = getTime();
         MonoTime next;
 

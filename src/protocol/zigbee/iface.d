@@ -725,7 +725,7 @@ private:
         hdr.last_hop_rssi = last_hop_rssi;
 
         // record sender...
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
         auto n = mod_zb.find_node(_coordinator.pan_id, sender);
         if (!n)
         {
@@ -775,7 +775,7 @@ private:
         // the network may have gone down, or come up as another, while the lookup was out
         if (_coordinator.node_id == 0xFFFE || cast(ushort)(cast(size_t)user_data >> 16) != _coordinator.pan_id)
             return;
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
 
         if (status == EmberStatus.SUCCESS)
         {

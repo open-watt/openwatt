@@ -49,17 +49,18 @@ enum LinuxPrintFormat
 
 // === console module ===
 
-final class LinuxNetConfModule : Module
+struct LinuxNetConfModule
 {
-    mixin DeclareModule!"os.linux.netconf";
+    mixin DeclareStaticModule!"os.linux.netconf";
+    static __gshared LinuxNetConfModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
-        g_app.console.register_command!(print_cmd, "print")("/system/linux", this);
-        g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", this);
+        g_app.console.register_command!(print_cmd, "print")("/system/linux", &this);
+        g_app.console.register_command!(neighbour_v4_print, "print")("/protocol/ip/neighbour", &this);
         static if (has_ipv6)
-            g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", this);
+            g_app.console.register_command!(neighbour_v6_print, "print")("/protocol/ip/neighbour6", &this);
     }
 
     // /system/linux/print [format=ip|interfaces] -- dump the live kernel network

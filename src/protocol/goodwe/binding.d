@@ -410,7 +410,7 @@ private:
         import protocol.goodwe : GoodWeModule, aa55_section_kind;
 
         if (!aa55_section_kind)
-            aa55_section_kind = register_profile_section("aa55", alloc!GoodWeModule(null));
+            aa55_section_kind = register_profile_section("aa55", alloc!GoodWeModule());
         Profile* profile = parse_profile("elements:\n\taa55: 1, 0, u8\tdesc: level\n", "goodwe-first-sample");
         assert(profile);
         scope(exit) free(profile);

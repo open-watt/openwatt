@@ -70,21 +70,26 @@ template function_command_desc(alias fun, string command_name = null)
         ArgTuple _args;
         if (!marshal_command_arguments(session, function_command_desc, arguments, parameters, &_args))
             return null;
+        alias Parent = __traits(parent, fun);
+        static if (is(Parent == struct))
+            alias Receiver = Parent*;
+        else
+            alias Receiver = Parent;
         static if (is(__traits(parent, fun)))
         {
             static if (is(ReturnType!fun == void))
             {
-                __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
+                __traits(getMember, cast(Receiver)_instance, __traits(identifier, fun))(session, _args.expand);
                 return null;
             }
             else static if (is(ReturnType!fun : CommandState))
             {
-                state = __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
+                state = __traits(getMember, cast(Receiver)_instance, __traits(identifier, fun))(session, _args.expand);
                 return null;
             }
             else
             {
-                auto r = __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
+                auto r = __traits(getMember, cast(Receiver)_instance, __traits(identifier, fun))(session, _args.expand);
                 return tconcat(r);
             }
         }

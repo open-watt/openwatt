@@ -692,7 +692,7 @@ nothrow @nogc:
     uint max_points;
     QueryMode mode;
 
-    void begin(RecordModule mod, scope const(char)[][] paths, ulong t0, ulong t1, uint max_points, QueryMode mode)
+    void begin(RecordModule* mod, scope const(char)[][] paths, ulong t0, ulong t1, uint max_points, QueryMode mode)
     {
         reset();
         this.t0 = t0;
@@ -870,19 +870,20 @@ private:
 }
 
 
-final class RecordModule : Module
+struct RecordModule
 {
-    mixin DeclareModule!"record";
+    mixin DeclareStaticModule!"record";
+    static __gshared RecordModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!Recorder();
-        g_app.console.register_command!(query_cmd, "query")("/record", this);
-        g_app.console.register_command!(graph_cmd, "graph")("/record", this);
+        g_app.console.register_command!(query_cmd, "query")("/record", &this);
+        g_app.console.register_command!(graph_cmd, "graph")("/record", &this);
     }
 
-    override void update()
+    void update()
     {
         Collection!Recorder().update_all();
     }
@@ -953,7 +954,7 @@ nothrow @nogc:
             Array!String paths;
             foreach (p; path)
                 paths ~= p.make_string();
-            return alloc!GraphViewState(session, this, paths.move, span, opt, height ? height.value : 0);
+            return alloc!GraphViewState(session, &this, paths.move, span, opt, height ? height.value : 0);
         }
 
         ulong t1 = unixTimeNs(to ? to.value : getSysTime());
@@ -966,7 +967,7 @@ nothrow @nogc:
         uint h = height ? height.value : 16;
 
         auto cmd = alloc!RecordGraphCommand(session, w, h, opt);
-        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph);
+        cmd.fetch.begin(&this, path, t0, t1, w * 2, QueryMode.graph);
         return cmd;
     }
 
@@ -977,7 +978,7 @@ nothrow @nogc:
         uint max_points = max ? max.value : 24;
 
         auto cmd = alloc!RecordQueryCommand(session, path);
-        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw);
+        cmd.fetch.begin(&this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw);
         return cmd;
     }
 }
@@ -993,7 +994,7 @@ nothrow @nogc:
 
     ~this() {}
 
-    this(Session session, RecordModule mod, Array!String paths, Duration span, GraphOptions opt, uint height)
+    this(Session session, RecordModule* mod, Array!String paths, Duration span, GraphOptions opt, uint height)
     {
         super(session, null, height ? LiveViewMode.inline_ : LiveViewMode.fullscreen);
         _mod = mod;
@@ -1063,7 +1064,7 @@ protected:
     }
 
 private:
-    RecordModule _mod;
+    RecordModule* _mod;
     Array!String _paths;
     Duration _span;
     GraphOptions _opt;
