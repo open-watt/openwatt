@@ -1,0 +1,17 @@
+  running: manager.sync.json_encoder ... encoder=1 captures=2 outer_intact=false
+control: {"kind":"error","seq":11,"text":"outer"}
+captured: {"kind":"error","seq":22,"text":"inner"}
+captured: {"kind":"error","seq":22,"text":"inner"}
+encoder=0 captures=2 outer_intact=false
+*** ASSERT: src\manager\sync\json_encoder.d(1548): nested outgoing callback changed the outer encoder frame
+    D:\tmp\ow-989-987-watcher-integration-20261125\third_party\urt\src\object.d:1044 object._d_unittest_msg+0x5f [0x00007FF64B9F758F]
+    D:\tmp\ow-989-987-watcher-integration-20261125\src\manager\sync\json_encoder.d:1548 manager.sync.json_encoder.__unittest_L1460_C1+0x849 [0x00007FF64B762DE9]
+    ??:? manager.sync.json_encoder.__modtest$FZv+0x1a [0x00007FF64B7632BA]
+    D:\tmp\ow-989-987-watcher-integration-20261125\third_party\urt\src\urt\package.d:156 urt.run_test+0x1f [0x00007FF64BD54B8F]
+    D:\tmp\ow-989-987-watcher-integration-20261125\third_party\urt\src\urt\package.d:89 urt.main+0x4cf [0x00007FF64BD54A0F]
+    D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:79 invoke_main+0x39 [0x00007FF64BE65989]
+    D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:288 __scrt_common_main_seh+0x12e [0x00007FF64BE658AE]
+    D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl:331 __scrt_common_main+0xe [0x00007FF64BE6576E]
+    D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_main.cpp:17 mainCRTStartup+0xe [0x00007FF64BE659FE]
+    ??:? BaseThreadInitThunk+0x1d [0x00007FFAD635257D]
+    ??:? RtlUserThreadStart+0x28 [0x00007FFAD65EAF08]

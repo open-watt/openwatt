@@ -1,0 +1,110 @@
+[
+  {
+    "delta": 778,
+    "base": 0,
+    "head": 778,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher9enumerateMFNbNiKS3urt5array__T5ArrayTSQDjQDfQDaQCm5EntryVmi0ZQBfZb"
+  },
+  {
+    "delta": -732,
+    "base": 2145,
+    "head": 1413,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher4scanMFNbNiZv"
+  },
+  {
+    "delta": 439,
+    "base": 0,
+    "head": 439,
+    "name": "_D7manager10collection14BaseCollection15destroy_dynamicMFNbNiZv"
+  },
+  {
+    "delta": 340,
+    "base": 1974,
+    "head": 2314,
+    "name": "_D6driver7windows8ethernet25WindowsPcapEthernetModule11apply_eventMFNbNiKxSQCvQCr15adapter_watcher12AdapterEventZv"
+  },
+  {
+    "delta": 279,
+    "base": 0,
+    "head": 279,
+    "name": "_D6driver7windows4wifi17WindowsWlanModule6deinitMFNbNiZv"
+  },
+  {
+    "delta": 259,
+    "base": 0,
+    "head": 259,
+    "name": "_D6driver7windows8ethernet25WindowsPcapEthernetModule6deinitMFNbNiZv"
+  },
+  {
+    "delta": 248,
+    "base": 0,
+    "head": 248,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher7releaseMFNbNiZv"
+  },
+  {
+    "delta": 239,
+    "base": 0,
+    "head": 239,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher7acquireMFNbNiZv"
+  },
+  {
+    "delta": -229,
+    "base": 229,
+    "head": 0,
+    "name": "_D6driver7windows4wifi17WindowsWlanModule8pre_initMFNbNiZv"
+  },
+  {
+    "delta": -229,
+    "base": 229,
+    "head": 0,
+    "name": "_D6driver7windows8ethernet25WindowsPcapEthernetModule8pre_initMFNbNiZv"
+  },
+  {
+    "delta": 148,
+    "base": 299,
+    "head": 447,
+    "name": "_D6driver7windows4wifi17WindowsWlanModule4initMFNbNiZv"
+  },
+  {
+    "delta": 139,
+    "base": 212,
+    "head": 351,
+    "name": "_D6driver7windows8ethernet25WindowsPcapEthernetModule4initMFNbNiZv"
+  },
+  {
+    "delta": 131,
+    "base": 0,
+    "head": 131,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher5resetMFNbNiZv"
+  },
+  {
+    "delta": 107,
+    "base": 3180,
+    "head": 3287,
+    "name": "_D6driver7windows4wifi17WindowsWlanModule11apply_eventMFNbNiKxSQCjQCf15adapter_watcher12AdapterEventZv"
+  },
+  {
+    "delta": -96,
+    "base": 96,
+    "head": 0,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher5startMFNbNiZb"
+  },
+  {
+    "delta": 51,
+    "base": 0,
+    "head": 51,
+    "name": "_D6object__T7destroyVbi1TS3urt5array__T5ArrayTS6driver7windows15adapter_watcher14AdapterWatcher5EntryVmi0ZQCpZQDuFNaNbNiKQDsZv"
+  },
+  {
+    "delta": 31,
+    "base": 0,
+    "head": 31,
+    "name": "_D6object__T16destruct_recurseTS3urt5array__T5ArrayTS6driver7windows15adapter_watcher14AdapterWatcher5EntryVmi0ZQCpZQEaFNaNbNiKQDsZv"
+  },
+  {
+    "delta": -10,
+    "base": 10,
+    "head": 0,
+    "name": "_D6driver7windows15adapter_watcher14AdapterWatcher9scan_syncMFNbNiZv"
+  }
+]

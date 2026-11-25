@@ -1,0 +1,70 @@
+{
+  "926-VALIDATION.md": {
+    "bytes": 2573,
+    "sha256": "74eb01aac8fe6130560de137e88c682e70f7a672d4765a7d99da8626cf414f35"
+  },
+  "926-apply_remote_simplification.py": {
+    "bytes": 718,
+    "sha256": "9557c7e1f99da9857c1dd10105f1be86f4e39c05c5660d3625d8196452e5c89a"
+  },
+  "926-assert_remote_configuration.py": {
+    "bytes": 593,
+    "sha256": "ea556c516a9adc97cea6d6f52ee1be199dad5c89770e45730c32b62d01a3a6da"
+  },
+  "926-codeview-errors.txt": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "926-endpoint-cleanup.d": {
+    "bytes": 40545,
+    "sha256": "eff00d2c1bc1d78939856bd8366641057508353c8a63e38ce9d57bf373b72c78"
+  },
+  "926-remove_dead_source.py": {
+    "bytes": 1050,
+    "sha256": "f030d9d77b79ba70bd63c0f4425e238ff916b3577f538353a16f406b57010eed"
+  },
+  "README.md": {
+    "bytes": 3213,
+    "sha256": "7e582aff8e43d35d35d7a8f456a782d5cc745f05f68e47f2b1f1283f3f7e1e51"
+  },
+  "encoder-reentry-evidence.md": {
+    "bytes": 2404,
+    "sha256": "ac4bdd1ecb458ce6ce68bff68d8f093f8929f1341869dce042816a353b026e4b"
+  },
+  "encoder-reentry-negative-test.txt": {
+    "bytes": 1584,
+    "sha256": "e9115cdc985613324e311dc8ba9fc4cc9e68a968e2843a5c1884ce935e2723e3"
+  },
+  "encoder-reentry-probe.d": {
+    "bytes": 3026,
+    "sha256": "b51177b267a877d4d2816cdbdf81c7b3f6e67c87940ac098319f173707d49af3"
+  },
+  "esp-ci-diagnosis.md": {
+    "bytes": 1410,
+    "sha256": "83a828726676c177199141d836b43f7343b35cdc208289b6da51a26bddfb0d12"
+  },
+  "process-global-registry-audit.md": {
+    "bytes": 16769,
+    "sha256": "82bf75d5727e66e8eca5f5e3e48eba525bb14485bc283914ad2fb12ed5b13754"
+  },
+  "superseded-two-phase-evidence.md": {
+    "bytes": 4216,
+    "sha256": "e245716c4ddc59ceeacab2b4d9c1271bbcb90e567c5bd33f5d880493cb1a1868"
+  },
+  "sync-encoder-lifetime-audit.md": {
+    "bytes": 7527,
+    "sha256": "ee87d9ff2796d5d97970b70435235333367bcbf4bf69df839f389ef955fcba86"
+  },
+  "windows-discovery-candidate.patch": {
+    "bytes": 13307,
+    "sha256": "c0edc99d01a8f3d715f6e596df761491352a4ed37e37ea0ad3cfae62643b1a44"
+  },
+  "windows-discovery-evidence.md": {
+    "bytes": 2613,
+    "sha256": "90a06848b8239f2952b37de91ac3f9b75beb37e44db8e76b940d5e05f8c5069a"
+  },
+  "windows-discovery-symbol-delta.json": {
+    "bytes": 2764,
+    "sha256": "7cf4ee4b3abc424182510f7ad2af2f81be5ab76f98cf7a8e0c87b6dff2db258d"
+  }
+}

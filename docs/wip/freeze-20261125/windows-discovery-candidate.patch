@@ -1,0 +1,312 @@
+diff --git a/src/driver/windows/ethernet.d b/src/driver/windows/ethernet.d
+index a285baef..1da23f80 100644
+--- a/src/driver/windows/ethernet.d
++++ b/src/driver/windows/ethernet.d
+@@ -182,6 +182,7 @@ nothrow @nogc:
+     override void deinit()
+     {
+         g_adapter_watcher.release();
++        Collection!WindowsPcapEthernet().destroy_dynamic();
+     }
+ 
+     override void update()
+@@ -211,22 +212,26 @@ private:
+         final switch (ev.kind) with (AdapterEventKind)
+         {
+             case added:
++                port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
++                foreach (e; Collection!WindowsPcapEthernet().values)
++                    if (e.adapter == ev.name)
++                        return;
+                 auto iface_name = next_iface_name();
+                 log_info(ModuleName, "Found ethernet interface: \"", ev.description, "\" (", ev.name, ")");
+-                port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
+-                auto iface = Collection!WindowsPcapEthernet().create(iface_name);
++                auto iface = Collection!WindowsPcapEthernet().create(iface_name, ObjectFlags.dynamic);
+                 iface.adapter = ev.name;
+                 iface.comment = ev.description.make_string();
+                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
+                 return;
+             case removed:
++                port_remove(PortKind.ethernet, tconcat("windows:ethernet:", ev.name));
+                 foreach (e; Collection!WindowsPcapEthernet().values)
+                 {
+-                    if (e.adapter == ev.name)
++                    if ((e.flags & ObjectFlags.dynamic) && e.adapter == ev.name)
+                     {
+                         writeInfo("Ethernet adapter gone: ", e.adapter);
+-                        port_remove(PortKind.ethernet, tconcat("windows:ethernet:", ev.name));
+-                        Collection!WindowsPcapEthernet().remove(e);
++                        BaseObject iface = e;
++                        iface.destroy();
+                         return;
+                     }
+                 }
+@@ -255,3 +260,82 @@ private:
+         return tconcat("ether", 999);
+     }
+ }
++
++
++unittest
++{
++    import manager : create_application, shutdown_application;
++    import manager.base : ActiveObject, StateSignal, register_object_state_handler, unregister_object_state_handler;
++    import manager.saved_config : export_all;
++
++    struct Observe
++    {
++        CID target;
++        bool destroyed;
++
++        void state(ActiveObject obj, StateSignal signal) nothrow @nogc
++        {
++            if (obj.id == target && signal == StateSignal.destroyed)
++                destroyed = true;
++        }
++    }
++
++    CID discovered;
++    {
++        create_application();
++        scope(exit) shutdown_application();
++        auto mod = get_module!WindowsPcapEthernetModule();
++        auto manual = Collection!WindowsPcapEthernet().create("test-configured-ethernet");
++        scope(exit) manual.destroy();
++        enum manual_adapter = "test-configured-ethernet-adapter";
++        manual.adapter = manual_adapter;
++        AdapterEvent ev;
++        ev.name_buf[0 .. manual_adapter.length] = manual_adapter;
++        ev.name_len = manual_adapter.length;
++        mod.apply_event(ev);
++        size_t matches;
++        foreach (e; Collection!WindowsPcapEthernet().values)
++            matches += e.adapter == manual_adapter;
++        assert(matches == 1);
++        ev.kind = AdapterEventKind.removed;
++        mod.apply_event(ev);
++        assert(get_item(manual.id) is manual);
++
++        enum adapter = "test-discovered-ethernet-adapter";
++        ev.kind = AdapterEventKind.added;
++        ev.name_buf[0 .. adapter.length] = adapter;
++        ev.name_len = adapter.length;
++        mod.apply_event(ev);
++        WindowsPcapEthernet owned;
++        foreach (e; Collection!WindowsPcapEthernet().values)
++            if (e.adapter == adapter)
++                owned = e;
++        assert(owned && (owned.flags & ObjectFlags.dynamic));
++        assert(owned.name("test-discovered-ethernet-renamed") is null);
++        discovered = owned.id;
++        mod.apply_event(ev);
++        matches = 0;
++        foreach (e; Collection!WindowsPcapEthernet().values)
++            matches += e.adapter == adapter;
++        assert(matches == 1);
++
++        MutableString!0 text;
++        export_all(text);
++        assert(text[].contains("/interface/ethernet/add name=test-configured-ethernet "));
++        assert(!text[].contains("/add name=test-discovered-ethernet-renamed "));
++        Observe observe;
++        observe.target = discovered;
++        register_object_state_handler(&observe.state);
++        scope(exit) unregister_object_state_handler(&observe.state);
++        ev.kind = AdapterEventKind.removed;
++        mod.apply_event(ev);
++        assert(observe.destroyed && get_item(discovered) is null);
++        ev.kind = AdapterEventKind.added;
++        mod.apply_event(ev);
++        foreach (e; Collection!WindowsPcapEthernet().values)
++            if (e.adapter == adapter)
++                discovered = e.id;
++        assert(get_item(discovered) !is null);
++    }
++    assert(get_item(discovered) is null);
++}
+diff --git a/src/driver/windows/wifi.d b/src/driver/windows/wifi.d
+index 7e378ae8..d7c38e14 100644
+--- a/src/driver/windows/wifi.d
++++ b/src/driver/windows/wifi.d
+@@ -483,6 +483,8 @@ nothrow @nogc:
+     override void deinit()
+     {
+         g_adapter_watcher.release();
++        Collection!WindowsWlan().destroy_dynamic();
++        Collection!WindowsWifiRadio().destroy_dynamic();
+     }
+ 
+     override void update()
+@@ -514,34 +516,38 @@ private:
+         final switch (ev.kind) with (AdapterEventKind)
+         {
+             case added:
++                port_add(PortKind.wifi, tconcat("windows:wifi:", ev.name), ev.name, ev.name, ModuleName, ev.description);
++                foreach (r; Collection!WindowsWifiRadio().values)
++                    if (r.adapter == ev.name)
++                        return;
+                 // Radio identity == OS adapter identity. The paired WLAN inherits its
+                 // adapter via the radio at startup (don't set wlan.adapter directly --
+                 // the WLANBaseInterface.radio setter clears adapter as a side-effect).
+                 auto base = next_radio_name();
+                 log_info(ModuleName, "Found wifi interface: \"", ev.description, "\" (", ev.name, ")");
+-                port_add(PortKind.wifi, tconcat("windows:wifi:", ev.name), ev.name, ev.name, ModuleName, ev.description);
+ 
+-                auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
++                auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
+                 radio.adapter = ev.name;
+                 radio.comment = ev.description.make_string();
+ 
+-                auto wlan = Collection!WindowsWlan().create(base);
++                auto wlan = Collection!WindowsWlan().create(base, ObjectFlags.dynamic);
+                 wlan.radio = radio;
+                 return;
+             case removed:
++                port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
+                 foreach (r; Collection!WindowsWifiRadio().values)
+                 {
+-                    if (r.adapter != ev.name)
++                    if (!(r.flags & ObjectFlags.dynamic) || r.adapter != ev.name)
+                         continue;
+                     writeInfo("Wifi adapter gone: ", r.adapter);
+-                    port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
+                     Array!WindowsWlan paired;
+                     foreach (w; Collection!WindowsWlan().values)
+-                        if (dyn_cast!WindowsWifiRadio(w.radio) is r)
++                        if ((w.flags & ObjectFlags.dynamic) && dyn_cast!WindowsWifiRadio(w.radio) is r)
+                             paired ~= w;
+-                    foreach (w; paired[])
+-                        Collection!WindowsWlan().remove(w);
+-                    Collection!WindowsWifiRadio().remove(r);
++                    foreach (BaseObject w; paired[])
++                        w.destroy();
++                    BaseObject radio = r;
++                    radio.destroy();
+                     return;
+                 }
+                 return;
+@@ -595,3 +601,104 @@ private WifiPhyMode to_phy_mode(DOT11_PHY_TYPE type) pure
+             return WifiPhyMode.unknown;
+     }
+ }
++
++
++unittest
++{
++    import manager.base : ActiveObject, StateSignal, register_object_state_handler, unregister_object_state_handler;
++    import manager.saved_config : export_all;
++
++    struct Observe
++    {
++        CID radio, wlan;
++        bool radio_destroyed, wlan_destroyed;
++
++        void state(ActiveObject obj, StateSignal signal) nothrow @nogc
++        {
++            if (signal == StateSignal.destroyed)
++            {
++                radio_destroyed |= obj.id == radio;
++                wlan_destroyed |= obj.id == wlan;
++            }
++        }
++    }
++
++    CID discovered_radio, discovered_wlan;
++    {
++        create_application();
++        scope(exit) shutdown_application();
++        auto mod = get_module!WindowsWlanModule();
++        auto manual_radio = Collection!WindowsWifiRadio().create("test-configured-radio");
++        scope(exit) manual_radio.destroy();
++        auto manual_wlan = Collection!WindowsWlan().create("test-configured-wlan");
++        scope(exit) manual_wlan.destroy();
++        enum manual_adapter = "test-configured-wifi-adapter";
++        manual_radio.adapter = manual_adapter;
++        manual_wlan.radio = manual_radio;
++        AdapterEvent ev;
++        ev.name_buf[0 .. manual_adapter.length] = manual_adapter;
++        ev.name_len = manual_adapter.length;
++        mod.apply_event(ev);
++        size_t matches;
++        foreach (r; Collection!WindowsWifiRadio().values)
++            matches += r.adapter == manual_adapter;
++        assert(matches == 1);
++        ev.kind = AdapterEventKind.removed;
++        mod.apply_event(ev);
++        assert(get_item(manual_radio.id) is manual_radio);
++        assert(get_item(manual_wlan.id) is manual_wlan);
++
++        enum adapter = "test-discovered-wifi-adapter";
++        ev.kind = AdapterEventKind.added;
++        ev.name_buf[0 .. adapter.length] = adapter;
++        ev.name_len = adapter.length;
++        mod.apply_event(ev);
++        WindowsWifiRadio radio;
++        WindowsWlan wlan;
++        foreach (r; Collection!WindowsWifiRadio().values)
++            if (r.adapter == adapter)
++                radio = r;
++        foreach (w; Collection!WindowsWlan().values)
++            if (dyn_cast!WindowsWifiRadio(w.radio) is radio)
++                wlan = w;
++        assert(radio && wlan);
++        assert((radio.flags & ObjectFlags.dynamic) && (wlan.flags & ObjectFlags.dynamic));
++        assert(radio.name("test-discovered-radio-renamed") is null);
++        assert(wlan.name("test-discovered-wlan-renamed") is null);
++        discovered_radio = radio.id;
++        discovered_wlan = wlan.id;
++        mod.apply_event(ev);
++        matches = 0;
++        foreach (r; Collection!WindowsWifiRadio().values)
++            matches += r.adapter == adapter;
++        assert(matches == 1);
++
++        MutableString!0 text;
++        export_all(text);
++        assert(text[].contains("/interface/wifi/add name=test-configured-radio "));
++        assert(text[].contains("/interface/wlan/add name=test-configured-wlan "));
++        assert(!text[].contains("/add name=test-discovered-radio-renamed "));
++        assert(!text[].contains("/add name=test-discovered-wlan-renamed "));
++        Observe observe;
++        observe.radio = discovered_radio;
++        observe.wlan = discovered_wlan;
++        register_object_state_handler(&observe.state);
++        scope(exit) unregister_object_state_handler(&observe.state);
++        ev.kind = AdapterEventKind.removed;
++        mod.apply_event(ev);
++        assert(observe.radio_destroyed && observe.wlan_destroyed);
++        assert(get_item(discovered_radio) is null && get_item(discovered_wlan) is null);
++        ev.kind = AdapterEventKind.added;
++        mod.apply_event(ev);
++        foreach (r; Collection!WindowsWifiRadio().values)
++            if (r.adapter == adapter)
++                radio = r;
++        foreach (w; Collection!WindowsWlan().values)
++            if (dyn_cast!WindowsWifiRadio(w.radio) is radio)
++                wlan = w;
++        discovered_radio = radio.id;
++        discovered_wlan = wlan.id;
++    }
++    assert(get_item(discovered_radio) is null);
++    assert(get_item(discovered_wlan) is null);
++}
+diff --git a/src/manager/collection.d b/src/manager/collection.d
+index ae89f9f5..ed7bb0b6 100644
+--- a/src/manager/collection.d
++++ b/src/manager/collection.d
+@@ -309,6 +309,14 @@ nothrow @nogc:
+         table.notify(item, CollectionEvent.added);
+     }
+ 
++    pragma(inline, false)
++    void destroy_dynamic()
++    {
++        foreach (obj; values)
++            if (obj.flags & ObjectFlags.dynamic)
++                obj.destroy();
++    }
++
+     void remove(BaseObject item)
+     {
+         if (table.get(item._id) is item)
