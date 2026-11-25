@@ -2,6 +2,7 @@ module manager.cron;
 
 import urt.mem;
 import urt.mem.temp : tconcat;
+import urt.meta.enuminfo : enum_from_key;
 import urt.result : StringResult;
 import urt.string;
 import urt.time;
@@ -260,17 +261,8 @@ ubyte parse_days(const(char)[] s)
             ++c;
         const(char)[] d = s[0 .. c];
         s = (c < s.length) ? s[c + 1 .. $] : null;
-        switch (d)
-        {
-            case "sun": mask |= 1 << Weekday.sun; break;
-            case "mon": mask |= 1 << Weekday.mon; break;
-            case "tue": mask |= 1 << Weekday.tue; break;
-            case "wed": mask |= 1 << Weekday.wed; break;
-            case "thu": mask |= 1 << Weekday.thu; break;
-            case "fri": mask |= 1 << Weekday.fri; break;
-            case "sat": mask |= 1 << Weekday.sat; break;
-            default: break;
-        }
+        if (const(Weekday)* day = enum_from_key!Weekday(d))
+            mask |= cast(ubyte)(1 << *day);
     }
     return mask ? mask : 0x7F;
 }
