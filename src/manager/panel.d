@@ -123,6 +123,12 @@ nothrow @nogc:
         g_app.console.register_command!identify("/system", this);
     }
 
+    override void deinit()
+    {
+        unregister_element_lifecycle_handler(&element_lifecycle);
+        g_panel = null;
+    }
+
     void identify(Session session, Nullable!Duration duration)
     {
         indicate(Gesture.identify, duration ? duration.value : 10.seconds);

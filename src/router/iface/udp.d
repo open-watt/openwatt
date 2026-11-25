@@ -195,6 +195,7 @@ nothrow @nogc:
             if (value == _reliable)
                 return;
             _reliable = value;
+            _caps = value ? InterfaceCaps.dedicated : InterfaceCaps.none;
             mark_set!(typeof(this), "reliable")();
             restart();
         }
@@ -300,7 +301,7 @@ protected:
                     log.error("failed to open RDP endpoint");
                     return CompletionStatus.error;
                 }
-                _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+                _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered | InterfaceCaps.dedicated);
                 set_l2mtu(rdp_max_message);
                 watch_station(bind_station);
                 return CompletionStatus.complete;
@@ -398,7 +399,7 @@ protected:
             {
                 _rdp.close();
                 _rdp = null;
-                _caps = InterfaceCaps.none;
+                _caps = _reliable ? InterfaceCaps.dedicated : InterfaceCaps.none;
             }
         }
         _remote = InetAddress();
@@ -565,5 +566,16 @@ unittest
         assert(u._bound && u.iface is null);    // configured, but unresolvable: detached, not wildcard
         u.iface(null);
         assert(!u._bound);                      // the null-vs-detached ambiguity must not block the clear
+    }
+
+    static if (has_rdp)
+    {
+        UDPInterface u = Collection!UDPInterface().create("udp-test-reliable-caps");
+        scope(exit) u.destroy();
+        assert(!(u.caps & InterfaceCaps.dedicated));
+        u.reliable(true);
+        assert(u.caps & InterfaceCaps.dedicated, "a sync peer binds a reliable interface before it is running");
+        u.reliable(false);
+        assert(!(u.caps & InterfaceCaps.dedicated));
     }
 }

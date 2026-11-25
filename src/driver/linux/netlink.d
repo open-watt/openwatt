@@ -32,6 +32,11 @@ void subscribe_link_changed(LinkChangedHandler handler)
     g_link_handlers ~= handler;
 }
 
+void unsubscribe_link_changed(LinkChangedHandler handler)
+{
+    g_link_handlers.removeFirst(handler);
+}
+
 private __gshared Array!LinkChangedHandler g_link_handlers;
 
 
@@ -67,6 +72,15 @@ nothrow @nogc:
             close(_fd);
             _fd = -1;
             return;
+        }
+    }
+
+    override void pre_deinit()
+    {
+        if (_fd >= 0)
+        {
+            close(_fd);
+            _fd = -1;
         }
     }
 

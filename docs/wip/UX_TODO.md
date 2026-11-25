@@ -822,3 +822,9 @@ Two behaviours worth knowing while planning views: energy counters do not bridge
 and energy moved while a meter was both silent and reset is lost to the daily account), and
 diffuse sink energy is deliberately not integrated, because sinks have no counters and
 integrating inferred power would fabricate data.
+
+## 2026-11-25: interfaces may report `dedicated` in `caps`
+
+- `caps` may now include `dedicated`: one service owns the point-to-point link. WebSocket
+  interfaces, `/interface/xram` and `/interface/udp reliable=yes` report it. Nothing in the UX
+  needs to act on it.

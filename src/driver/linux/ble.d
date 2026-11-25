@@ -602,14 +602,18 @@ nothrow @nogc:
         g_app.console.register_collection!LinuxBLEInterface();
     }
 
-    override void deinit()
+    override void pre_deinit()
     {
-        remove_fd_watcher(&service_sockets);
         if (_fd >= 0)
         {
             close(_fd);
             _fd = -1;
         }
+    }
+
+    override void deinit()
+    {
+        remove_fd_watcher(&service_sockets);
     }
 
 package:

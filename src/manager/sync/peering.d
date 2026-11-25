@@ -956,4 +956,82 @@ unittest
     }
     foreach (_; 0 .. 4)
         Collection!SyncPeer().update_all();
+
+    static if (has_rdp)
+    {
+        static final class Hold : ActiveObject
+        {
+            enum type_name = "test-peering-hold";
+            enum collection_id = CollectionType.stream;
+        nothrow @nogc:
+            ~this() {}
+            bool released;
+            this(CID id, ObjectFlags flags = ObjectFlags.none)
+            {
+                super(collection_type_info!Hold, id, flags);
+            }
+            override CompletionStatus startup()
+                => CompletionStatus.complete;
+            override CompletionStatus shutdown()
+                => released ? CompletionStatus.complete : CompletionStatus.continue_;
+        }
+
+        static struct Seen
+        {
+            __gshared bool draining;
+            __gshared uint created, ticks;
+        }
+
+        static final class Probe : Module
+        {
+        nothrow @nogc:
+            CID hold;
+            this(Application app)
+            {
+                super(app, "test-peering-drain".make_string());
+            }
+            void on_lifecycle(BaseObject, ObjectLifecycleEvent event)
+            {
+                Seen.created += Seen.draining && event == ObjectLifecycleEvent.created;
+            }
+            override void pre_deinit()
+            {
+                Seen.draining = true;
+                get_module!SyncPeeringModule._next_sweep = MonoTime();
+            }
+            override void deinit()
+            {
+                unregister_object_lifecycle_handler(&on_lifecycle);
+            }
+            override void update()
+            {
+                if (Seen.draining && ++Seen.ticks == 3)
+                    get_item!Hold(hold).released = true;
+                Collection!Hold().update_all();
+            }
+        }
+
+        Application app = create_application();
+        Probe probe = alloc!Probe(app);
+        app.modules ~= probe;
+        register_object_lifecycle_handler(&probe.on_lifecycle);
+
+        Hold hold = Collection!Hold().create("test-peering-hold", ObjectFlags.dynamic);
+        hold.do_update();
+        probe.hold = hold.id;
+
+        SyncPeeringModule peering = get_module!SyncPeeringModule;
+        peering._enabled = true;
+        peering._role = PeerRole.member;
+        Neighbor* n = get_module!SyncDiscoveryModule.neighbors.insert(0xB0B, Neighbor(0xB0B));
+        n.name = "test-authority".make_string();
+        n.role = PeerRole.authority;
+        n.last_seen = getTime();
+        n.touch_link(null, InetAddress(IPAddr(127, 0, 0, 1), 0), InetAddress(IPAddr(127, 0, 0, 1), 4900), getTime());
+        assert(n.best_link(getTime()) !is null);
+
+        shutdown_application();
+        free(probe);
+        assert(Seen.ticks >= 3 && Seen.created == 0);
+    }
 }

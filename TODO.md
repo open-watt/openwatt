@@ -793,6 +793,15 @@ The current implementation and remaining phases are described in
     button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
     key against a string, and `true`/`false` should be literals.
 
+11. **Automations fire during Application teardown**: `shutdown_application` destroys objects
+    in registry order, so an automation reached later in the pass can still run its `do={}` on an
+    earlier object's `offline`/`destroyed` signal or a status element write. A script that saves
+    configuration would then save a half-destroyed tree. Decide whether automations retire before
+    anything else is destroyed or whether providers stop signalling at the request phase. More
+    generally, a configured object created during the first drain (a script, a console or sync
+    command still running) or any object created after the second request is never retired, and
+    the drain stalls into its assert.
+
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own
@@ -1174,6 +1183,21 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **Link ports** (#926, #887): a link UDP endpoint binds only a `dedicated` link; a port layer comes back when the first non-dedicated multi-service link needs it.
+
+- **Link endpoint follow-ups** (2026-11-25, #926 review):
+  - `UDPEndpoint.text()` stores a per-send choice on the endpoint; a send that forgets `text(false)`
+    sends binary as WebSocket text. Make it a send argument.
+  - `SyncPeer.transport_ready` reads the same-name successor through `_transport`, not the instance
+    `_udp` is bound to; latent while every caller is gated on `running`.
+  - `SyncPeer.control_room` and `arm_tx` dereference `_udp` unchecked, relying on "running implies
+    `_udp`"; state it with a `debug assert`.
+  - A slaved interface now terminates every raw and udp frame locally; say so in the bridge and
+    master section of docs/CLI.md.
+  - `PeerFlags` bit 0 is unused; XRAM `tx_commit` has one caller and could be private.
+  - `UDPInterface` changes `caps` without `mark_set` (the `reliable` setter, startup, shutdown), so a
+    client mirroring `caps` misses `dedicated`, `reliable` and `ordered` coming and going.
+
 - **RDP allocation-failure coverage**: session, frame and held-frame allocations fail soft (a send is
   refused, a frame cut retries on the session timer, an early frame is dropped for retransmission), but no test injects a
   failure; add it once the fixture can fail an allocation on demand.
@@ -1439,6 +1463,15 @@ this is what remains.
 
 ## Infrastructure
 
+- **Windows native UDP receive buffer** (2026-11-25, #988 review): `RecvFromOp.control` is a plain
+  `ubyte[64]` cast to `WSACMSGHDR*` and is 8-aligned only by the fields before it; give it
+  `align(8)`. `alloc!RecvFromOp` also zero-fills the 64 KiB `buf` on every open although the kernel
+  overwrites it.
+- **Modules outlive their Application** (2026-11-25, #989 review): `shutdown_application` runs
+  every `deinit` but never frees the modules, so each recreation in the unit suite leaks one set.
+  Freeing them first needs every process registry that holds a module to be Application-scoped
+  or cleared with it: profile sections and root sections keep their handler until the next
+  registration rebinds it, and `protocol.can.binding`'s test relies on that stale handler.
 - **Delete the ClassInfo layout probe ASAP**: urt's `platforms.mk` probes the compiler's druntime
   and sets `ClassInfoNoVtbl`, which drops `vtbl` from `object.d`'s `TypeInfo_Class` and `Interface`
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
@@ -2081,9 +2114,9 @@ so D0's devices appear on M0 only.
 - **Packets between the cores ride sync**: D0 reaches the network through M0 by a sync frame kind
   carrying packets, on the one raw XRAM channel, as `/interface/tunnel` in
   [TAPS_AND_TUNNELS.draft.md](docs/TAPS_AND_TUNNELS.draft.md); no Ethernet channel over XRAM.
-- **Sync copies each frame into XRAM**: `/interface/xram` offers `tx_reserve`/`tx_commit`, so the
-  sync encoders could build a frame where D0 or M0 reads it. Worth it once the M0/D0 link carries
-  bulk traffic.
+- **Sync copies each frame into XRAM**: a reserve/commit pair on `/interface/xram`, over the uRT
+  XRAM ring's own, would let the sync encoders build a frame where D0 or M0 reads it. Worth it once
+  the M0/D0 link carries bulk traffic.
 - **A doorbell event the full event queue refuses waits for the next heartbeat**, up to a second.
 - **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
 - **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.
