@@ -948,7 +948,6 @@ void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb
     invoke_callback!withUserdata(cb, inst, user_data, args.expand);
 }
 
-pragma(inline, false)
 private bool valid_response_size(const(ubyte)[] response, size_t taken)
 {
     if (taken == 0 || taken > response.length)
@@ -966,7 +965,6 @@ private bool valid_response_size(const(ubyte)[] response, size_t taken)
     return true;
 }
 
-pragma(inline, false)
 private void invoke_callback(bool withUserdata, Args...)(void* cb, void* inst, void* user_data, Args args)
 {
     if (inst)

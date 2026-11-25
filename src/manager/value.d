@@ -240,7 +240,6 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-pragma(inline, false)
 private bool parse_integer_token(const(char)[] s, out long value)
 {
     import urt.conv : parse_int, parse_uint;

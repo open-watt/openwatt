@@ -402,7 +402,6 @@ const(char)[] convert_argument(T)(ref const Variant v, void* arg)
         return from_variant(v, *cast(T*)arg);
 }
 
-pragma(inline, false)
 private bool marshal_command_arguments(Session session, ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] params, void* buffer)
 {
     const(char)[] error = marshal_arguments(desc, args, params, buffer);

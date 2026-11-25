@@ -1282,7 +1282,6 @@ nothrow @nogc:
 private:
     Array!char _buf;
 
-    pragma(inline, false)
     void encode_text_command(SyncPeer peer, const(char)[] verb, uint seq, const(char)[] text)
     {
         begin_frame(verb);
@@ -1292,7 +1291,6 @@ private:
         send_frame(peer);
     }
 
-    pragma(inline, false)
     void begin_property_frame(SyncPeer peer, const(char)[] verb, CID target, const(char)[] prop_name)
     {
         begin_frame(verb);
@@ -1301,7 +1299,6 @@ private:
         write_str(prop_name);
     }
 
-    pragma(inline, false)
     void finish_property_frame(SyncPeer peer, uint seq)
     {
         if (seq)

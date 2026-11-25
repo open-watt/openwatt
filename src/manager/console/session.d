@@ -477,7 +477,6 @@ nothrow @nogc:
         }
     }
 
-    pragma(inline, false)
     private final void write_packed_line(const(void)* packed, size_t mask)
     {
         import urt.mem.temp : tconcat_impl;

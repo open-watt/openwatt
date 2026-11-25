@@ -338,7 +338,6 @@ nothrow @nogc:
         }
     }
 
-    pragma(inline, false)
     private const(char)[] try_write_scalar(Scalar value, ValueType expected, uint user_type_id, SysTime t, Subscriber who)
     {
         const(DataFormat)* f = data_format;

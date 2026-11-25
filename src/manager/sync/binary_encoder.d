@@ -1083,7 +1083,6 @@ nothrow @nogc:
 private:
     Array!ubyte _buf;
 
-    pragma(inline, false)
     void encode_text_command(SyncPeer peer, Verb verb, uint seq, const(char)[] text)
     {
         begin_frame(verb);
@@ -1092,7 +1091,6 @@ private:
         send_frame(peer);
     }
 
-    pragma(inline, false)
     void begin_property_frame(SyncPeer peer, Verb verb, CID target, const(char)[] prop_name)
     {
         begin_frame(verb);
@@ -1100,7 +1098,6 @@ private:
         _buf.put_str(prop_name);
     }
 
-    pragma(inline, false)
     void finish_property_frame(SyncPeer peer, uint seq)
     {
         _buf.put_varint(seq);
