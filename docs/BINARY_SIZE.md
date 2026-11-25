@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-25 | 096172ce | ldc 1.43.0 | 3,807,328 | 153,592 | - | #989 matched control, BUILD_ID=module-index-matched, urt a448e54 |
+| 2026-11-25 | #989 | ldc 1.43.0 | 3,805,064 | 153,528 | - | -2,264 B / -64 B RAM vs 096172ce; indexed module lookup, two-phase bounded drain, module pre_deinit/deinit pairs |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -242,6 +244,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,540,724 | 46,440 | 4,194,304 | also share property marking |
 | 2026-11-25 | 1102ee0f | ldc 1.43.0 | 1,540,788 | 46,448 | 4,194,304 | matched control for the boxed Variant lookup |
 | 2026-11-25 | #990 / urt a448e54 | ldc 1.43.0 | 1,535,444 | 46,448 | 4,194,304 | shared boxed Variant lookup saves 5,344 bytes |
+| 2026-11-25 | 096172ce | ldc 1.43.0 | 1,535,348 | 46,428 | 4,194,304 | #989 matched control, BUILD_ID=module-index-matched |
+| 2026-11-25 | #989 | ldc 1.43.0 | 1,535,268 | 46,432 | 4,194,304 | -80 B / +4 B RAM vs 096172ce; one byte of module slot per module type; the shutdown sequence is not linked into embedded images |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

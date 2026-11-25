@@ -317,6 +317,19 @@ bool ring_from_isr(ubyte doorbell)
 
 void shutdown_application()
 {
+    enum drain_timeout = 5.seconds;
+
+    MonoTime give_up = getTime() + drain_timeout;
+    // configured objects go first, so an owner retires the dynamic children it holds
+    request_destroy(true);
+    if (!drain_objects(true, give_up))
+        return;
+    request_destroy(false);
+    foreach (m; g_app.modules)
+        m.pre_deinit();
+    if (!drain_objects(false, give_up))
+        return;
+
     foreach (m; g_app.modules)
         m.deinit();
 
@@ -334,10 +347,7 @@ void shutdown_application()
 Mod get_module(Mod)()
     if (is(Mod : Module))
 {
-    __gshared Mod g_module_instance = null;
-    if (!g_module_instance)
-        g_module_instance = cast(Mod)cast(void*)g_app.module_instance(Mod.ModuleName);
-    return g_module_instance;
+    return g_app.module_instance!Mod();
 }
 
 
@@ -589,29 +599,27 @@ nothrow @nogc:
         return true;
     }
 
-    void register_module(Module mod)
+    void register_module(Module mod, ref ubyte type_slot)
     {
         import urt.string.format;
 
         foreach (m; modules)
             assert(m.module_name[] != mod.module_name, tconcat("Module '", mod.module_name, "' already registered!"));
 
+        assert(modules.length < ubyte.max);
+        if (!type_slot)
+            type_slot = cast(ubyte)(modules.length + 1);
+        assert(type_slot == modules.length + 1, "Module registration order changed");
+
         mod.module_id = modules.length;
         modules ~= mod;
     }
 
-    Module module_instance(const(char)[] name) pure
-    {
-        foreach (i; 0 .. modules.length)
-            if (modules[i].module_name[] == name[])
-                return modules[i];
-        return null;
-    }
-
-    Mod module_instance(Mod)() pure
+    Mod module_instance(Mod)()
         if (is(Mod : Module))
     {
-        return cast(Mod)cast(void*)module_instance(Mod.ModuleName);
+        size_t index = cast(size_t)module_slot!Mod - 1;
+        return index < modules.length ? cast(Mod)cast(void*)modules[index] : null;
     }
 
     bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
@@ -1034,6 +1042,13 @@ nothrow @nogc:
         }
         if ((getTime() - flush_start).as!"msecs" >= SlowEventFlushMs)
             log_event_flush(flush_start, worst_event_dur, worst_event_age, worst_event_queue, worst_event_func, worst_event_ctx, priority_count, bulk_count, passes, slices, false);
+    }
+
+    MonoTime iterate(MonoTime deadline)
+    {
+        wait_for_wake(deadline);
+        process_events();
+        return process_due();
     }
 
     void update()
@@ -2020,6 +2035,45 @@ Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)
 
 private:
 
+void request_destroy(bool configured_only)
+{
+    foreach_object((BaseObject obj) {
+        if (configured_only && !obj.configured)
+            return;
+        if (auto active = dyn_cast!ActiveObject(obj))
+            if (active.destroying)
+                return;
+        obj.destroy();
+    });
+}
+
+bool drain_objects(bool configured_only, MonoTime give_up)
+{
+    for (MonoTime deadline = getTime(); objects_pending(configured_only); )
+    {
+        if (getTime() >= give_up)
+        {
+            MutableString!0 stuck;
+            foreach_object((BaseObject obj) {
+                stuck.append(stuck.length ? ", " : "", obj.name[]);
+                if (auto active = dyn_cast!ActiveObject(obj))
+                    stuck.append(" (", active.status_message(), ")");
+            });
+            version (unittest)
+                assert(0, tconcat("Application shutdown stalled: ", stuck[]));
+            else
+            {
+                import urt.io : flush, WriteTarget, writeln_err;
+                writeln_err("Application shutdown stalled, abandoning teardown: ", stuck[]);
+                flush!(WriteTarget.stderr)();
+                return false;
+            }
+        }
+        deadline = g_app.iterate(deadline < give_up ? deadline : give_up);
+    }
+    return true;
+}
+
 struct PendingEvent
 {
     EventHandler handler;
@@ -2034,6 +2088,13 @@ struct Doorbells
 nothrow @nogc:
     ubyte register(DoorbellHandler handler, EventPriority priority)
     {
+        foreach (i, h; _handlers[0 .. _count])
+        {
+            if (h !is handler)
+                continue;
+            assert(((_control >> i) & 1) == (priority == EventPriority.control), "doorbell re-registered at another priority");
+            return cast(ubyte)i;
+        }
         assert(_count < _handlers.length, "out of doorbells");
         immutable ubyte doorbell = _count++;
         _handlers[doorbell] = handler;
@@ -2691,4 +2752,136 @@ unittest
     }
     thread_join(consumer);
     assert(lost == 0, "a coalesced ring lost the work before it");
+}
+
+
+unittest
+{
+    import manager.log : LogModule;
+    import manager.sync.encoder : encoder_for, SyncEncoderKind;
+
+    static final class DrainObject : ActiveObject
+    {
+        enum type_name = "test-module-drain";
+        enum collection_id = CollectionType.stream;
+    nothrow @nogc:
+        ~this() {}
+        bool serviced;
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!DrainObject, id, flags);
+        }
+        override CompletionStatus startup()
+            => CompletionStatus.complete;
+        override CompletionStatus shutdown()
+            => serviced ? CompletionStatus.complete : CompletionStatus.continue_;
+    }
+
+    static final class OwnerObject : ActiveObject
+    {
+        enum type_name = "test-module-owner";
+        enum collection_id = CollectionType.telnet_server;
+    nothrow @nogc:
+        ~this() {}
+        DrainObject child;
+        this(CID id, ObjectFlags flags = ObjectFlags.none)
+        {
+            super(collection_type_info!OwnerObject, id, flags);
+        }
+        override CompletionStatus startup()
+        {
+            child = Collection!DrainObject().create("test-owned-child", ObjectFlags.dynamic);
+            return child ? CompletionStatus.complete : CompletionStatus.error;
+        }
+        override CompletionStatus shutdown()
+        {
+            child.serviced = true;
+            child.destroy();
+            child = null;
+            return CompletionStatus.complete;
+        }
+    }
+
+    static struct Seen
+    {
+        __gshared bool requested, released;
+        __gshared uint deinits;
+    }
+
+    static final class DrainModule : Module
+    {
+    nothrow @nogc:
+        CID owned, retiring, spawned, owner, proxy;
+        this(Application app)
+        {
+            super(app, "test-module-drain".make_string());
+            auto obj = Collection!DrainObject().create("test-module-drain");
+            owned = obj.id;
+            obj.do_update();
+            assert(obj.running);
+            auto pending = Collection!DrainObject().create("test-already-retiring", ObjectFlags.dynamic);
+            retiring = pending.id;
+            pending.do_update();
+            pending.destroy();
+            assert(pending.destroying);
+            auto child = Collection!DrainObject().create("test-dynamic-drain", ObjectFlags.dynamic);
+            spawned = child.id;
+            child.do_update();
+            assert(child.running);
+            auto parent = Collection!OwnerObject().create("test-module-owner");
+            owner = parent.id;
+            parent.do_update();
+            assert(parent.running && parent.child);
+            auto remote = Collection!DrainObject().create("test-remote-drain", ObjectFlags.remote);
+            proxy = remote.id;
+            remote.set_remote_state(StateSignal.online);
+            assert(remote.running);
+        }
+        override void pre_deinit()
+        {
+            assert(!Seen.requested);
+            assert(get_item(owned) is null && get_item(owner) is null && get_item(proxy) is null);
+            assert(get_item!DrainObject(spawned).destroying);
+            Seen.requested = true;
+        }
+        override void update()
+        {
+            assert(!Seen.released);
+            assert(encoder_for(SyncEncoderKind.json) !is null);
+            assert(encoder_for(SyncEncoderKind.binary) !is null);
+            foreach (id; [owned, retiring, spawned])
+                if (auto current = get_item!DrainObject(id))
+                    current.serviced = current.destroying;
+            Collection!DrainObject().update_all();
+        }
+        override void deinit()
+        {
+            assert(Seen.requested && ++Seen.deinits == 1);
+            assert(get_item(owned) is null && get_item(retiring) is null && get_item(spawned) is null && get_item(proxy) is null);
+            uint table, slot = 1;
+            assert(next_object(table, slot) is null);
+            assert(encoder_for(SyncEncoderKind.json) is null);
+            assert(encoder_for(SyncEncoderKind.binary) is null);
+            Seen.released = true;
+        }
+    }
+
+    Application first = create_application();
+    ubyte doorbells = g_doorbells._count;
+    assert(register_doorbell(&Application.pages_freed, EventPriority.control) == g_pages_freed);
+    LogModule previous = get_module!LogModule();
+    ubyte log_slot = module_slot!LogModule;
+    assert(log_slot == previous.module_id + 1 && first.modules[previous.module_id] is previous);
+    assert(first.module_instance!Module() is null);
+    auto drain = alloc!DrainModule(first);
+    first.modules ~= drain;
+    shutdown_application();
+    free(drain);
+    assert(Seen.released && Seen.deinits == 1);
+    assert(g_app is null);
+
+    Application second = create_application();
+    scope(exit) shutdown_application();
+    assert(module_slot!LogModule == log_slot && get_module!LogModule() is second.modules[log_slot - 1]);
+    assert(g_doorbells._count == doorbells);
 }

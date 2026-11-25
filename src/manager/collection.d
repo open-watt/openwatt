@@ -511,6 +511,17 @@ void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
 }
 
 
+package bool objects_pending(bool configured_only)
+{
+    foreach (ref table; g_item_tables)
+        table.free_pending();
+    uint table, slot = 1;
+    while (BaseObject obj = next_object(table, slot))
+        if (!configured_only || obj.configured)
+            return true;
+    return false;
+}
+
 private:
 
 // HACK: is this satisfactory?

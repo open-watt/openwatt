@@ -172,16 +172,16 @@ final class WindowsPcapEthernetModule : Module
     mixin DeclareModule!"ethernet.pcap";
 nothrow @nogc:
 
-    override void pre_init()
-    {
-        g_adapter_watcher.scan_sync();
-        drain_events();
-    }
-
     override void init()
     {
         g_app.console.register_collection!WindowsPcapEthernet();
-        g_adapter_watcher.start();
+        g_adapter_watcher.acquire();
+        drain_events();
+    }
+
+    override void pre_deinit()
+    {
+        g_adapter_watcher.release();
     }
 
     override void update()

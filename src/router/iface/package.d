@@ -20,7 +20,7 @@ import manager : resolve_element;
 import manager.base;
 import manager.collection;
 import manager.console;
-import manager.element : Element, ElementLifecycleEvent, register_element_lifecycle_handler;
+import manager.element : Element, ElementLifecycleEvent, register_element_lifecycle_handler, unregister_element_lifecycle_handler;
 import manager.id : EID;
 import manager.features;
 import manager.panel : LightEffect;
@@ -1281,6 +1281,7 @@ nothrow @nogc:
 
         close_udp_endpoints();
         register_inet_scope_provider(null);
+        unregister_element_lifecycle_handler(&led_created);
     }
 
     override void update()

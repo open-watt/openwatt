@@ -39,6 +39,11 @@ void register_device_lifecycle_handler(DeviceLifecycleHandler handler)
     _on_device_lifecycle ~= handler;
 }
 
+void unregister_device_lifecycle_handler(DeviceLifecycleHandler handler)
+{
+    _on_device_lifecycle.removeFirst(handler);
+}
+
 enum OnlineStatus : ubyte
 {
     unknown,

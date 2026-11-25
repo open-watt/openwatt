@@ -793,6 +793,15 @@ The current implementation and remaining phases are described in
     button's `event`. `Type.eq` compares the two Variants raw; an enum operand should compare by
     key against a string, and `true`/`false` should be literals.
 
+11. **Automations fire during Application teardown**: `shutdown_application` destroys objects
+    in registry order, so an automation reached later in the pass can still run its `do={}` on an
+    earlier object's `offline`/`destroyed` signal or a status element write. A script that saves
+    configuration would then save a half-destroyed tree. Decide whether automations retire before
+    anything else is destroyed or whether providers stop signalling at the request phase. More
+    generally, a configured object created during the first drain (a script, a console or sync
+    command still running) or any object created after the second request is never retired, and
+    the drain stalls into its assert.
+
 ## System IO
 
 Buttons, relays and lights as data-model components, the `system` device as the node's own
@@ -1439,6 +1448,11 @@ this is what remains.
 
 ## Infrastructure
 
+- **Modules outlive their Application** (2026-11-25, #989 review): `shutdown_application` runs
+  every `deinit` but never frees the modules, so each recreation in the unit suite leaks one set.
+  Freeing them first needs every process registry that holds a module to be Application-scoped
+  or cleared with it: profile sections and root sections keep their handler until the next
+  registration rebinds it, and `protocol.can.binding`'s test relies on that stale handler.
 - **Delete the ClassInfo layout probe ASAP**: urt's `platforms.mk` probes the compiler's druntime
   and sets `ClassInfoNoVtbl`, which drops `vtbl` from `object.d`'s `TypeInfo_Class` and `Interface`
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`
