@@ -171,7 +171,7 @@ jobs:
     env:
       # The IDF link is minutes per target, so only builds that ship binaries pay for it.
       BUILD_FIRMWARE: ${{ github.ref == 'refs/heads/release' || github.event_name == 'workflow_dispatch' }}
-      IDF_REF: v6.0
+      IDF_REF: v6.1
       IDF_TARGETS: esp32,esp32s3,esp32c5,esp32c6,esp32p4
       # A board selects its own platform; bare platforms build the devkit reference config.
       MAKE_TARGET: ${{ matrix.target.board && format('BOARD={0}', matrix.target.board) || format('PLATFORM={0}', matrix.target.name) }}
@@ -183,10 +183,11 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      # Xtensa passes LDC bitcode to esp-clang's llc, which uses LLVM 21 in IDF v6.1.
       - name: Setup LDC
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ldc
+          compiler: ${{ matrix.target.arch == 'xtensa' && 'ldc-1.42.0' || 'ldc' }}
 
       - name: Install RISC-V toolchain
         if: ${{ matrix.target.arch == 'riscv' }}
