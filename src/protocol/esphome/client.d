@@ -52,8 +52,13 @@ nothrow @nogc:
     }
 
     // Properties...
-    ref const(String) remote() const pure
-        => _host;
+    String remote() const
+    {
+        import urt.mem.temp : tstring;
+        if (!_host.empty || _remote == InetAddress())
+            return _host;
+        return make_string(tstring(_remote));
+    }
     void remote(InetAddress value)
     {
         // apply explicit port if assigned
@@ -70,9 +75,7 @@ nothrow @nogc:
     }
     StringResult remote(String value)
     {
-        if (value.empty)
-            return StringResult("remote cannot be empty");
-        if (value == _host)
+        if (value == _host && _remote == InetAddress())
             return StringResult();
 
         _host = value.move;
@@ -101,6 +104,8 @@ nothrow @nogc:
             (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port == value))
             return;
         update_port(_remote, _port);
+        if (_host.empty && (_remote.family == AddressFamily.ipv4 || _remote.family == AddressFamily.ipv6))
+            mark_set!(typeof(this), "remote")();
 
         restart();
     }
@@ -266,6 +271,39 @@ package:
         client._stream = null;
         client.remote(resolved);
         assert(client.get_address() == "192.0.2.1");
+        assert(client.remote == "192.0.2.1:6053");
+        client.remote(InetAddress(IPAddr(192, 0, 2, 2), 0));
+        assert(client.remote == "192.0.2.2:6053");
+
+        ushort slot = client.attach_delta_slot(null);
+        scope(exit) client.detach_delta_slot(slot);
+        enum remote_bit = ulong(1) << prop_index!(ESPHomeClient, "remote");
+        enum port_bit = ulong(1) << prop_index!(ESPHomeClient, "port");
+        client.port(6054);
+        assert(sync_state(slot).props_dirty == (remote_bit | port_bit));
+        assert(client.get("remote").asString == "192.0.2.2:6054");
+        sync_state(slot).props_dirty = 0;
+        client.port(6054);
+        assert(sync_state(slot).props_dirty == 0);
+
+        client.reset("remote");
+        assert(client.remote.empty && client.remote_address == InetAddress());
+        assert(client.get_config()["remote"].isNull);
+        assert(sync_state(slot).props_dirty & remote_bit);
+        debug
+        {
+            import manager.sync.encoder : assert_reset_matches_init;
+            assert_reset_matches_init(client, *client.properties()[prop_index!(ESPHomeClient, "remote")]);
+        }
+
+        client.remote(make_string("a-long-hostname-with-refcounted-storage.test.invalid"));
+        String host = client.remote;
+        assert(host.ptr is client._host.ptr);
+        client.remote(StringLit!"test.invalid");
+        sync_state(slot).props_dirty = 0;
+        client.port(6055);
+        assert(sync_state(slot).props_dirty == port_bit);
+        assert(client.get("remote").asString == "test.invalid");
     }
 
 private:
