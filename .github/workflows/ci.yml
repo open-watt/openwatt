@@ -183,11 +183,11 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      # esp-clang's llc cannot read bitcode from an LDC built on a newer LLVM major.
+      # Xtensa passes LDC bitcode to esp-clang's llc, which uses LLVM 21 in IDF v6.1.
       - name: Setup LDC
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ldc-1.42.0
+          compiler: ${{ matrix.target.arch == 'xtensa' && 'ldc-1.42.0' || 'ldc' }}
 
       - name: Install RISC-V toolchain
         if: ${{ matrix.target.arch == 'riscv' }}
