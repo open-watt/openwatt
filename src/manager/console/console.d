@@ -325,7 +325,7 @@ nothrow @nogc:
 
     void register_command(alias method, string command_name = null, Instance)(const(char)[] _scope, Instance instance)
     {
-        register_command(_scope, Command(&function_command_desc!(method, command_name), cast(void*)instance));
+        register_command(_scope, Command(&function_command_desc!(method, command_name)(), cast(void*)instance));
     }
 
     void register_collection(Type)()
