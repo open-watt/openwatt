@@ -151,6 +151,104 @@ struct IdAllocator(T) if (is(T == class) || is(T == U*, U))
 {
 nothrow @nogc:
 
+    uint claim(const(char)[] name, T obj)
+        => slots.claim(name, cast(size_t)cast(void*)obj);
+
+    void bind(uint id, T obj)
+        => slots.bind(id, cast(size_t)cast(void*)obj);
+
+    T deref(ref uint id)
+        => cast(T)cast(void*)slots.deref(id);
+
+    inout(T) get(uint id) inout pure
+        => cast(inout(T))cast(void*)slots.get(id);
+
+    inout(T) at(uint id) inout pure
+        => cast(inout(T))cast(void*)slots.at(id);
+
+    // Borrowed slot storage may move on the next allocation.
+    T* lookup(const(char)[] name)
+        => cast(T*)slots.lookup(name);
+
+    uint reserve(const(char)[] name)
+        => slots.reserve(name);
+
+    bool rename(uint id, const(char)[] old_name, const(char)[] new_name)
+        => slots.rename(id, old_name, new_name);
+
+    void release(uint id)
+        => slots.release(id);
+
+    uint find(const(char)[] name) const pure
+        => slots.find(name);
+
+    const(char)[] name_of(uint id) const pure
+        => slots.name_of(id);
+
+    String name_string(uint id) const pure
+        => slots.name_string(id);
+
+    uint slot_count() const pure
+        => slots.slot_count();
+
+    auto values()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdAllocator* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            T front() pure => m.at(slot);
+            void popFront() { ++slot; advance(); }
+
+        private:
+            void advance()
+            {
+                while (slot <= m.slot_count && m.at(slot) is null)
+                    ++slot;
+            }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
+    auto names()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdAllocator* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            String front() pure => m.name_string(slot);
+            void popFront() { ++slot; advance(); }
+
+        private:
+            void advance()
+            {
+                while (slot <= m.slot_count && m.at(slot) is null)
+                    ++slot;
+            }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
+package(manager):
+    uint claim_unindexed(const(char)[] name, T obj)
+        => slots.claim_unindexed(name, cast(size_t)cast(void*)obj);
+
+private:
+    IdSlots slots;
+}
+
+private struct IdSlots
+{
+nothrow @nogc:
+
     uint reserve(const(char)[] name)
     {
         if (uint* p = name in _names)
@@ -158,9 +256,9 @@ nothrow @nogc:
         return allocate(name);
     }
 
-    uint claim(const(char)[] name, T obj)
+    uint claim(const(char)[] name, size_t obj)
     {
-        debug assert(obj !is null);
+        debug assert(obj != 0);
         if (uint* p = name in _names)
         {
             uint id = *p;
@@ -168,27 +266,19 @@ nothrow @nogc:
             debug assert(!(w & 1), "name entry holds a forwarded id");
             if (w)
                 return 0;
-            _slots[][id] = cast(size_t)cast(void*)obj;
+            _slots[][id] = obj;
             return id;
         }
         uint id = allocate(name);
-        _slots[][id] = cast(size_t)cast(void*)obj;
+        _slots[][id] = obj;
         return id;
     }
 
-    package(manager) uint claim_unindexed(const(char)[] name, T obj)
+    void bind(uint id, size_t obj)
     {
-        debug assert(obj !is null);
-        uint id = allocate_slot(name);
-        _slots[][id] = cast(size_t)cast(void*)obj;
-        return id;
-    }
-
-    void bind(uint id, T obj)
-    {
-        debug assert(obj !is null);
+        debug assert(obj != 0);
         debug assert(id && id < _slots.length && _slots[][id] == 0, "bind to a live or forwarded id");
-        _slots[][id] = cast(size_t)cast(void*)obj;
+        _slots[][id] = obj;
     }
 
     bool rename(uint id, const(char)[] old_name, const(char)[] new_name)
@@ -224,11 +314,11 @@ nothrow @nogc:
         _slots[][id] = 0;
     }
 
-    T deref(ref uint id)
+    size_t deref(ref uint id)
     {
         uint i = id;
         if (!i || i >= _slots.length)
-            return null;
+            return 0;
         size_t w = _slots[][i];
         while (w & 1)
         {
@@ -237,26 +327,26 @@ nothrow @nogc:
         }
         if (i != id)
             id = i;
-        return cast(T)cast(void*)w;
+        return w;
     }
 
-    inout(T) get(uint id) inout pure
+    size_t get(uint id) inout pure
     {
         if (!id || id >= _slots.length)
-            return null;
+            return 0;
         size_t w = _slots[][id];
         while (w & 1)
             w = _slots[][w >> 1];
-        return cast(inout(T))cast(void*)w;
+        return w;
     }
 
-    // does not follow forwards (unlike get), so dense iteration visits each object once
-    inout(T) at(uint id) inout pure
+    // Skip forwards so dense iteration visits each object once.
+    size_t at(uint id) inout pure
     {
         if (!id || id >= _slots.length)
-            return null;
+            return 0;
         size_t w = _slots[][id];
-        return (w & 1) ? null : cast(inout(T))cast(void*)w;
+        return (w & 1) ? 0 : w;
     }
 
     uint find(const(char)[] name) const pure
@@ -265,51 +355,16 @@ nothrow @nogc:
         return p ? *p : 0;
     }
 
-    // transient pointer to the bound ref, or null; invalidated by the next allocation (slots may move)
-    T* lookup(const(char)[] name)
+    size_t* lookup(const(char)[] name)
     {
         uint t = terminal(find(name));
         if (!t)
             return null;
         size_t* w = &_slots[][t];
-        return (*w && !(*w & 1)) ? cast(T*)w : null;
+        return (*w && !(*w & 1)) ? w : null;
     }
 
-    auto values()
-    {
-        struct Range
-        {
-        nothrow @nogc:
-            IdAllocator* m;
-            uint slot;
-            bool empty() const pure => slot > m.slot_count;
-            T front() pure => m.at(slot);
-            void popFront() { ++slot; advance(); }
-            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
-        }
-        auto r = Range(&this, 1);
-        r.advance();
-        return r;
-    }
-
-    auto names()
-    {
-        struct Range
-        {
-        nothrow @nogc:
-            IdAllocator* m;
-            uint slot;
-            bool empty() const pure => slot > m.slot_count;
-            String front() pure => m.name_string(slot);
-            void popFront() { ++slot; advance(); }
-            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
-        }
-        auto r = Range(&this, 1);
-        r.advance();
-        return r;
-    }
-
-    // the slice borrows the name entry's storage: stable until that slot renames
+    // The slice borrows the slot's name entry until it is renamed.
     const(char)[] name_of(uint id) const pure
     {
         uint t = terminal(id);
@@ -326,6 +381,15 @@ nothrow @nogc:
     {
         uint n = cast(uint)_slots.length;
         return n ? n - 1 : 0;
+    }
+
+package(manager):
+    uint claim_unindexed(const(char)[] name, size_t obj)
+    {
+        debug assert(obj != 0);
+        uint id = allocate_slot(name);
+        _slots[][id] = obj;
+        return id;
     }
 
 private:
