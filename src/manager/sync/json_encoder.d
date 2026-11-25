@@ -133,51 +133,32 @@ nothrow @nogc:
         if (!p.get)
             return;
 
-        begin_frame("set");
-        _buf.append(",\"target\":", peer.handle_of(obj));
-        _buf.append(",\"prop\":");
-        write_str(p.name[]);
+        begin_property_frame(peer, "set", obj.id, p.name[]);
         _buf.append(",\"value\":");
         Variant v = p.get(obj, *p);
         write_variant(v);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq)
     {
-        begin_frame("set");
-        _buf.append(",\"target\":", peer.handle_of(target));
-        _buf.append(",\"prop\":");
-        write_str(prop_name);
+        begin_property_frame(peer, "set", target, prop_name);
         _buf.append(",\"value\":");
         write_variant(value);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_reset(SyncPeer peer, CID target, const(char)[] prop_name, uint seq)
     {
-        begin_frame("reset");
-        _buf.append(",\"target\":", peer.handle_of(target));
-        _buf.append(",\"prop\":");
-        write_str(prop_name);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        begin_property_frame(peer, "reset", target, prop_name);
+        finish_property_frame(peer, seq);
     }
 
     // Outbound: commands, errors, enums, subscriptions
 
     override void encode_cmd(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("cmd");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "cmd", seq, text);
     }
 
     override int encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text)
@@ -196,20 +177,12 @@ nothrow @nogc:
 
     override void encode_error(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("error");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "error", seq, text);
     }
 
     override void encode_suggest(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("suggest");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "suggest", seq, text);
     }
 
     override void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed)
@@ -1308,6 +1281,33 @@ nothrow @nogc:
 
 private:
     Array!char _buf;
+
+    pragma(inline, false)
+    void encode_text_command(SyncPeer peer, const(char)[] verb, uint seq, const(char)[] text)
+    {
+        begin_frame(verb);
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"text\":");
+        write_str(text);
+        send_frame(peer);
+    }
+
+    pragma(inline, false)
+    void begin_property_frame(SyncPeer peer, const(char)[] verb, CID target, const(char)[] prop_name)
+    {
+        begin_frame(verb);
+        _buf.append(",\"target\":", peer.handle_of(target));
+        _buf.append(",\"prop\":");
+        write_str(prop_name);
+    }
+
+    pragma(inline, false)
+    void finish_property_frame(SyncPeer peer, uint seq)
+    {
+        if (seq)
+            _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
 
     void begin_frame(const(char)[] kind)
     {
