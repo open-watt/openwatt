@@ -1439,6 +1439,10 @@ this is what remains.
 
 ## Infrastructure
 
+- **The source list rides in the environment**: `$(TARGET)` exports `OW_SOURCES` (about 20 KB on
+  a host build) because native Windows make truncates recipe lines past 8K. Every prerequisite's
+  recipe inherits it, and Windows caps one variable at 32,767 characters, so a port with a much
+  larger source list will hit the cap. Move the list into a file written at parse time if it grows.
 - **Delete the ClassInfo layout probe ASAP**: urt's `platforms.mk` probes the compiler's druntime
   and sets `ClassInfoNoVtbl`, which drops `vtbl` from `object.d`'s `TypeInfo_Class` and `Interface`
   to bridge dmd#24027. Once DMD 2.115 and an LDC on its frontend are the minimum, drop `vtbl`

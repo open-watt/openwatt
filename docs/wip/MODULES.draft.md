@@ -216,14 +216,10 @@ than approximate because the build is whole-program single-invocation, so there 
 granularity to get wrong. `ow_modules.h` gets the same treatment and must additionally be a prerequisite
 of `$(BAREMETAL_OBJS)`, which compile under their own rules.
 
-**A second file fixes an existing hole.** The manifest only covers the module set. Changing `TINY`,
-`HEADLESS`, `BOARD` or a compiler flag moves no file's mtime, and *shrinking* the source list moves none
-either, since `$(SOURCES)` as a prerequisite catches added and modified files but never removed ones.
-This is the wart AGENTS.md currently documents as "make clean between FEATURES changes". So emit
-`$(OBJDIR)/build.sig` the same write-if-changed way, holding the fully resolved `DFLAGS` plus the sorted
-source list, and list it as a prerequisite too. The compiler never reads it; it exists so that any
-build-affecting change moves exactly one mtime. That subsumes the module-set case, the removed-source
-case and the `FEATURES` wart in a single mechanism.
+**Flags and the source list already rebuild.** A successful build records its exact `DFLAGS` and
+source list in `$(OBJDIR)/build.stamp`, a makefile fragment that make includes and compares at parse
+time; a difference forces `$(TARGET)`. The recipe deletes the stamp before compiling, so a failed build
+never validates its output. A module set reaches both, so needs nothing more.
 
 ## How modules actually remove code
 
@@ -250,7 +246,7 @@ PR-grade.
 
 **1. Engine, with no behaviour change.** Build `modules.mk` (table syntax, closure, availability,
 manifest and header emission, write-if-changed, `explain-modules`, unknown-name errors), `urt.features`,
-the `-J $(OBJDIR)` root, the new prerequisites and `build.sig`. Define *only* the three existing tiers as
+the `-J $(OBJDIR)` root and the new prerequisites. Define *only* the three existing tiers as
 bundles, and keep `has_all` / `has_ip` / `has_tls` / `has_http` / `has_switch` as aliases over `has!()`
 so no call site changes. Verify: same targets build byte-identically, a repeated `make` does nothing, and
 a `MODULES` change rebuilds exactly once.

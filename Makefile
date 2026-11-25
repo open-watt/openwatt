@@ -336,7 +336,9 @@ endif
 
 # -- Main target -------------------------------------------------------
 
-FLAGSTAMP = $(OBJDIR)/build.flags
+BUILD_STAMP = $(OBJDIR)/build.stamp
+# Replaces $(1) with "$$tmp" when the content differs; a concurrent build may publish the same content.
+publish_tmp = { cmp -s "$$tmp" "$(1)" || mv -f "$$tmp" "$(1)" || cmp -s "$$tmp" "$(1)"; }; s=$$?; rm -f "$$tmp"; exit $$s
 
 # Host-side image footprint report, run straight from source by rdmd.
 # The project ldc2.conf drops the default libraries, so the LDC path restores them.
@@ -368,6 +370,9 @@ endif
 build: $(TARGET) $(EXTRA_ARTEFACTS)
 
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
+# Through the environment: native Windows make truncates a recipe line past 8K and collapses its backslashes.
+$(TARGET): export OW_SOURCES := $(SOURCES)
+$(TARGET): export OW_STAMP_FLAGS = $(subst $(HASH_SIGN),$$(HASH_SIGN),$(subst $$,$$$$,$(BUILD_FLAGS)))
 
 ifdef D0_PAYLOAD
 # D0 is its own build; its make decides whether anything needs relinking.
@@ -413,8 +418,8 @@ endif
 
 $(TARGET):
 	mkdir -p $(OBJDIR) $(TARGETDIR)
-	echo $(APP_SOURCES) > $(RSPFILE)
-	echo $(URT_SOURCES) >> $(RSPFILE)
+	@rm -f $(BUILD_STAMP)
+	@tmp=$$(mktemp "$(RSPFILE).XXXXXX") && echo $$OW_SOURCES > "$$tmp" && $(call publish_tmp,$(RSPFILE))
 	$(COMPILE_CMD)
 ifeq ($(PLATFORM),bl808)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
@@ -444,7 +449,7 @@ ifneq ($(filter esp%,$(PLATFORM)),)
 else
 	-@$(BINSTATS) $(TARGET) $(if $(BINSTATS_IMAGE),--image $(TARGETDIR)/$(BINSTATS_IMAGE)) $(BINSTATS_LEDGER)
 endif
-	@printf '%s' '$(BUILD_FLAGS)' > $(FLAGSTAMP)
+	@tmp=$$(mktemp "$(BUILD_STAMP).XXXXXX") && printf 'STAMPED_FLAGS := |%s|\nSTAMPED_SOURCES := %s\n' "$$OW_STAMP_FLAGS" "$$OW_SOURCES" > "$$tmp" && $(call publish_tmp,$(BUILD_STAMP))
 ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-container
 	@$(MAKE) --no-print-directory routeros-tar
@@ -745,10 +750,14 @@ ifeq ($(ROUTEROS_BUILD),1)
 endif
 
 BUILD_FLAGS := $(DFLAGS) $(RAM_IMAGE) $(RAM_IMAGE_PACKER)
-FLAGS_CHANGED := $(shell printf '%s' '$(BUILD_FLAGS)' | cmp -s - $(FLAGSTAMP) || echo 1)
 
-ifneq ($(FLAGS_CHANGED),)
-.PHONY: flags_changed
-flags_changed:
-$(TARGET): flags_changed
+# What the last successful build compiled; the bars keep the flags' whitespace exact.
+HASH_SIGN := \#
+-include $(BUILD_STAMP)
+STAMP_WAS := $(STAMPED_FLAGS)$(strip $(STAMPED_SOURCES))
+STAMP_NOW := |$(BUILD_FLAGS)|$(strip $(SOURCES))
+ifneq ($(STAMP_WAS),$(STAMP_NOW))
+.PHONY: FORCE
+FORCE:
+$(TARGET): FORCE
 endif
