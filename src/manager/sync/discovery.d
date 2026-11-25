@@ -610,9 +610,10 @@ private:
 }
 
 
-final class SyncDiscoveryModule : Module
+struct SyncDiscoveryModule
 {
-    mixin DeclareModule!"sync.discovery";
+    mixin DeclareStaticModule!"sync.discovery";
+    static __gshared SyncDiscoveryModule module_state;
 nothrow @nogc:
 
     Map!(ulong, Neighbor) neighbors;
@@ -622,13 +623,13 @@ nothrow @nogc:
     bool     local_claimed;
     bool     local_adopted;
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!UDPDiscovery();
-        g_app.console.register_command!(neighbor_print, "print")("/sync/neighbor", this);
+        g_app.console.register_command!(neighbor_print, "print")("/sync/neighbor", &this);
     }
 
-    override void update()
+    void update()
     {
         Collection!UDPDiscovery().update_all();
 

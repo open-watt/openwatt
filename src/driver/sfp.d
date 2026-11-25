@@ -25,12 +25,12 @@ else
 nothrow @nogc:
 
 
-final class SFPModule : Module
+struct SFPModule
 {
-    mixin DeclareModule!"driver.sfp";
+    mixin DeclareStaticModule!"driver.sfp";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!SFPPort();
         SFPInterface.init_doorbell();

@@ -434,7 +434,7 @@ private:
         import protocol.mqtt : MQTTModule;
 
         if (!mqtt_section_kind)
-            mqtt_section_kind = register_profile_section("mqtt", alloc!MQTTModule(null));
+            mqtt_section_kind = register_profile_section("mqtt", alloc!MQTTModule());
         Profile* profile = parse_profile("elements:\n\tmqtt: sample/level, u8\tdesc: level\n", "mqtt-first-sample");
         assert(profile);
         scope(exit) free(profile);

@@ -383,18 +383,18 @@ private:
     }
 }
 
-final class PCF85063Module : Module
+struct PCF85063Module
 {
-    mixin DeclareModule!"driver.rtc.pcf85063";
+    mixin DeclareStaticModule!"driver.rtc.pcf85063";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!PCF85063Error();
         g_app.console.register_collection!PCF85063();
     }
 
-    override void update()
+    static void update()
     {
         Collection!PCF85063().update_all();
     }

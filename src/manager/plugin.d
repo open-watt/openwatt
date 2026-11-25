@@ -1,244 +1,247 @@
 module manager.plugin;
 
-import urt.log : Log;
-import urt.mem;
-import urt.string;
-
-import manager;
-import manager.config : ConfItem;
 import manager.features;
 
-nothrow @nogc:
+nothrow:
 
+version (unittest) enum has_application_shutdown = true;
+else version (Embedded) enum has_application_shutdown = false;
+else enum has_application_shutdown = true;
 
-class Module
+enum ModulePhase : ubyte
 {
-nothrow @nogc:
+    pre_init,
+    init,
+    post_init,
+    pre_update,
+    update,
+    post_update,
+    deinit,
+}
 
-    alias log = Log!module_name;
+alias ModuleHook = void function() nothrow @nogc;
 
-    String module_name;
-    size_t module_id = -1;
+struct ModuleRegistration
+{
+    string name;
+    void* state;
+    ModuleHook[has_application_shutdown ? ModulePhase.max + 1 : ModulePhase.deinit] hooks;
 
-    void pre_init()
+    void run(ModulePhase phase) const nothrow @nogc
     {
+        if (auto hook = hooks[phase])
+            invoke(hook);
     }
 
-    void init()
+    void invoke(ModuleHook hook) const nothrow @nogc
     {
-    }
-
-    void post_init()
-    {
-    }
-
-    void deinit()
-    {
-    }
-
-    void pre_update()
-    {
-    }
-
-    void update()
-    {
-    }
-
-    void post_update()
-    {
-    }
-
-protected:
-    this(Application app, String name)
-    {
-        import urt.lifetime : move;
-        this.module_name = name.move;
+        if (state)
+        {
+            void delegate() nothrow @nogc dg;
+            dg.ptr = cast(void*)state;
+            dg.funcptr = hook;
+            dg();
+        }
+        else
+            hook();
     }
 }
 
-// helper template to register a plugin
-mixin template DeclareModule(string name)
+mixin template DeclareStaticModule(string name)
 {
-    import manager : Application;
-    import urt.string : StringLit;
-
     enum string ModuleName = name;
-
-    this(Application app) nothrow @nogc
-    {
-        super(app, StringLit!ModuleName);
-    }
+    enum is_static_module = true;
+    import urt.log : Log;
+    alias log = Log!name;
 }
 
+__gshared const(ModuleRegistration[]) registrations = collect_modules();
 
-//
-// HACK: MANUALLY REGISTER ALL THE MODULES
-//
-void register_modules(Application app)
+void run_module_phase(ModulePhase phase, scope const(ModuleRegistration)[] modules = registrations) nothrow @nogc
 {
+    foreach (ref entry; modules)
+        entry.run(phase);
+}
+
+static assert(module_names_unique(registrations), "Duplicate module name");
+
+private:
+
+bool module_names_unique(scope const ModuleRegistration[] modules)
+{
+    foreach (i, ref module_; modules)
+        foreach (ref previous; modules[0 .. i])
+            if (module_.name == previous.name)
+                return false;
+    return true;
+}
+
+ModuleRegistration[] collect_modules()
+{
+    ModuleRegistration[] result;
     import manager.log, manager.cron, manager.object_signal, manager.panel, manager.record, manager.sync,
            manager.sync.discovery, manager.sync.peering;
-    register_module!(manager.log)(app);
-    register_module!(manager.cron)(app);
-    register_module!(manager.object_signal)(app);
-    register_module!(manager.panel)(app);
-    register_module!(manager.record)(app);
-    register_module!(manager.sync)(app);
-    register_module!(manager.sync.discovery)(app);
-    register_module!(manager.sync.peering)(app);
+    result ~= collect_module!(manager.log)();
+    result ~= collect_module!(manager.cron)();
+    result ~= collect_module!(manager.object_signal)();
+    result ~= collect_module!(manager.panel)();
+    result ~= collect_module!(manager.record)();
+    result ~= collect_module!(manager.sync)();
+    result ~= collect_module!(manager.sync.discovery)();
+    result ~= collect_module!(manager.sync.peering)();
 
     version (NoIDFLog) {}
     else version (ESP8266) {}
     else version (Espressif)
     {
         import driver.esp32.idf_log_bridge;
-        register_module!(driver.esp32.idf_log_bridge)(app);
+        result ~= collect_module!(driver.esp32.idf_log_bridge)();
     }
 
     import router.port;
-    register_module!(router.port)(app);
+    result ~= collect_module!(router.port)();
 
     static if (has_switch)
     {
         version (SmartEVSE)
         {
             import driver.boards.smartevse;
-            register_module!(driver.boards.smartevse)(app);
+            result ~= collect_module!(driver.boards.smartevse)();
         }
 
         version (linux)
         {
             import driver.linux.fdwatch;
-            register_module!(driver.linux.fdwatch)(app);
+            result ~= collect_module!(driver.linux.fdwatch)();
             import driver.linux.netlink;
-            register_module!(driver.linux.netlink)(app);
+            result ~= collect_module!(driver.linux.netlink)();
             import driver.linux.netlink_write;
-            register_module!(driver.linux.netlink_write)(app);
+            result ~= collect_module!(driver.linux.netlink_write)();
             version (KernelMirror)
             {
                 import driver.linux.bridge;
-                register_module!(driver.linux.bridge)(app);
+                result ~= collect_module!(driver.linux.bridge)();
                 import driver.linux.netlink_dump;
-                register_module!(driver.linux.netlink_dump)(app);
+                result ~= collect_module!(driver.linux.netlink_dump)();
             }
         }
 
         import router.pcap;
-        register_module!(router.pcap)(app);
+        result ~= collect_module!(router.pcap)();
 
         import router.stream;
-        register_module!(router.stream)(app);
-        register_module!(router.stream.bridge)(app);
+        result ~= collect_module!(router.stream)();
+        result ~= collect_module!(router.stream.bridge)();
         version (Embedded) {}
         else
-            register_module!(router.stream.console)(app);
-        register_module!(router.stream.duplex)(app);
-        register_module!(router.stream.file)(app);
-        register_module!(router.stream.memory)(app);
-        register_module!(router.stream.serial)(app);
+            result ~= collect_module!(router.stream.console)();
+        result ~= collect_module!(router.stream.duplex)();
+        result ~= collect_module!(router.stream.file)();
+        result ~= collect_module!(router.stream.memory)();
+        result ~= collect_module!(router.stream.serial)();
         version (ESP32_C3)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_C5)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_C6)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_H2)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_P4)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_S2)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_S3)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
         else version (ESP32_S31)
-            register_module!(router.stream.usb_serial)(app);
+            result ~= collect_module!(router.stream.usb_serial)();
 
         import manager.console.session;
-        register_module!(manager.console.session)(app);
+        result ~= collect_module!(manager.console.session)();
 
         import router.iface;
-        register_module!(router.iface)(app);
-        register_module!(router.iface.bridge)(app);
-        register_module!(router.iface.i2c)(app);
-        register_module!(router.iface.wifi)(app);
-        register_module!(router.iface.wpan)(app);
+        result ~= collect_module!(router.iface)();
+        result ~= collect_module!(router.iface.bridge)();
+        result ~= collect_module!(router.iface.i2c)();
+        result ~= collect_module!(router.iface.wifi)();
+        result ~= collect_module!(router.iface.wpan)();
         version (BL808)
         {
             import driver.bl808.xram;
-            register_module!(driver.bl808.xram)(app);
+            result ~= collect_module!(driver.bl808.xram)();
         }
 
         import driver.ethernet, driver.wifi, driver.wpan;
-        register_module!(driver.ethernet)(app);
-        register_module!(driver.wifi)(app);
+        result ~= collect_module!(driver.ethernet)();
+        result ~= collect_module!(driver.wifi)();
         static if (is(WpanModule))
-            register_module!(driver.wpan)(app);
+            result ~= collect_module!(driver.wpan)();
 
         static if (has_sfp)
         {
             import driver.sfp;
-            register_module!(driver.sfp)(app);
+            result ~= collect_module!(driver.sfp)();
         }
     }
 
     static if (has_all)
     {
         import driver.power.regulator;
-        register_module!(driver.power.regulator)(app);
+        result ~= collect_module!(driver.power.regulator)();
 
         import driver.rtc.pcf85063;
-        register_module!(driver.rtc.pcf85063)(app);
+        result ~= collect_module!(driver.rtc.pcf85063)();
 
         import protocol;
-        register_module!(protocol.ble)(app);
+        result ~= collect_module!(protocol.ble)();
 
         import driver.ble;
         static if (is(BLEDriverModule))
-            register_module!(driver.ble)(app);
-        register_module!(protocol.can)(app);
+            result ~= collect_module!(driver.ble)();
+        result ~= collect_module!(protocol.can)();
 
         import driver.can;
         static if (is(CANDriverModule))
-            register_module!(driver.can)(app);
+            result ~= collect_module!(driver.can)();
 
-        register_module!(protocol.cpc)(app);
-        register_module!(protocol.dhcp)(app);
-        register_module!(protocol.dns)(app);
-        register_module!(protocol.esphome)(app);
-        register_module!(protocol.ezsp)(app);
-        register_module!(protocol.goodwe)(app);
-        register_module!(protocol.gpio)(app);
-        register_module!(protocol.http)(app);
-        register_module!(protocol.ip)(app);
+        result ~= collect_module!(protocol.cpc)();
+        result ~= collect_module!(protocol.dhcp)();
+        result ~= collect_module!(protocol.dns)();
+        result ~= collect_module!(protocol.esphome)();
+        result ~= collect_module!(protocol.ezsp)();
+        result ~= collect_module!(protocol.goodwe)();
+        result ~= collect_module!(protocol.gpio)();
+        result ~= collect_module!(protocol.http)();
+        result ~= collect_module!(protocol.ip)();
         static if (has_modbus)
-            register_module!(protocol.modbus)(app);
-        register_module!(protocol.mqtt)(app);
-        register_module!(protocol.ntp)(app);
-        register_module!(protocol.obd)(app);
-        register_module!(protocol.ppp)(app);
-//        register_module!(protocol.snmp)(app);
-        register_module!(protocol.spinel)(app);
-        register_module!(protocol.telnet)(app);
-        register_module!(protocol.tesla)(app);
-        register_module!(protocol.zigbee)(app);
+            result ~= collect_module!(protocol.modbus)();
+        result ~= collect_module!(protocol.mqtt)();
+        result ~= collect_module!(protocol.ntp)();
+        result ~= collect_module!(protocol.obd)();
+        result ~= collect_module!(protocol.ppp)();
+//        result ~= collect_module!(protocol.snmp)();
+        result ~= collect_module!(protocol.spinel)();
+        result ~= collect_module!(protocol.telnet)();
+        result ~= collect_module!(protocol.tesla)();
+        result ~= collect_module!(protocol.zigbee)();
 
         static if (has_tls)
         {
             import protocol.tls;
-            register_module!(protocol.tls)(app);
+            result ~= collect_module!(protocol.tls)();
         }
 
         import apps.api;
-        register_module!(apps.api)(app);
+        result ~= collect_module!(apps.api)();
 
         import apps.automation;
-        register_module!(apps.automation)(app);
+        result ~= collect_module!(apps.automation)();
 
         import apps.energy;
-        register_module!(apps.energy)(app);
+        result ~= collect_module!(apps.energy)();
 
         import apps.ota;
-        register_module!(apps.ota)(app);
+        result ~= collect_module!(apps.ota)();
     }
     else
     {
@@ -246,58 +249,109 @@ void register_modules(Application app)
         {
             import protocol.ip;
             import protocol.dhcp;
-            register_module!(protocol.ip)(app);
-            register_module!(protocol.dhcp)(app);
+            result ~= collect_module!(protocol.ip)();
+            result ~= collect_module!(protocol.dhcp)();
         }
 
         static if (has_http)
         {
             import protocol.http;
-            register_module!(protocol.http)(app);
+            result ~= collect_module!(protocol.http)();
         }
 
         static if (has_tls)
         {
             import protocol.tls;
-            register_module!(protocol.tls)(app);
+            result ~= collect_module!(protocol.tls)();
         }
 
         static if (has_ota)
         {
             import apps.automation;
-            register_module!(apps.automation)(app);
+            result ~= collect_module!(apps.automation)();
 
             import apps.ota;
-            register_module!(apps.ota)(app);
+            result ~= collect_module!(apps.ota)();
         }
 
         static if (has_api)
         {
             import apps.api;
-            register_module!(apps.api)(app);
+            result ~= collect_module!(apps.api)();
         }
     }
+    return result;
 }
 
 
-private:
-
-void register_module(alias mod)(Application app)
+ModuleRegistration[] collect_module(alias mod)()
 {
-    alias AllModules = Modules!mod;
-    static if (AllModules.length == 0)
-        pragma(msg, "Warning: No `Module`s declared in ", mod.stringof);
-    else static foreach (m; AllModules)
-        app.register_module(alloc!m(app));
-}
-
-import urt.meta : AliasSeq;
-template Modules(alias mod)
-{
-    alias Modules = AliasSeq!();
+    ModuleRegistration[] result;
     static foreach (m; __traits(allMembers, mod))
+    {{
+        static if (is(__traits(getMember, mod, m) == struct))
+        {
+            alias T = __traits(getMember, mod, m);
+            static if (__traits(hasMember, T, "is_static_module"))
+                result ~= describe_static_module!T();
+        }
+    }}
+    return result;
+}
+
+ModuleRegistration describe_static_module(T)()
+{
+    ModuleRegistration result;
+    result.name = T.ModuleName;
+    enum stateful = __traits(hasMember, T, "module_state");
+    static if (stateful)
     {
-        static if (is(__traits(getMember, mod, m) : Module))
-            Modules = AliasSeq!(Modules, __traits(getMember, mod, m));
+        static assert(is(typeof(T.module_state) == T));
+        static assert(__traits(isZeroInit, T), T.stringof ~ " state must be zero-initialized");
+        result.state = cast(void*)&T.module_state;
     }
+
+    static foreach (phase; __traits(allMembers, ModulePhase))
+    {{
+        static if ((has_application_shutdown || phase != "deinit") &&
+                   __traits(hasMember, T, phase) && __traits(compiles, &__traits(getMember, T, phase)))
+        {
+            alias hook = __traits(getMember, T, phase);
+            static assert(__traits(isStaticFunction, hook) != stateful,
+                T.stringof ~ "." ~ phase ~ " must match the module's state");
+            result.hooks[__traits(getMember, ModulePhase, phase)] = &hook;
+        }
+    }}
+    return result;
+}
+
+unittest
+{
+    static struct Stateful
+    {
+    nothrow @nogc:
+        int count;
+        void update() { ++count; }
+    }
+
+    static struct Stateless
+    {
+    nothrow @nogc:
+        static __gshared int count;
+        static void update() { ++count; }
+    }
+
+    Stateful state;
+    ModuleRegistration entry;
+    entry.state = &state;
+    entry.hooks[ModulePhase.update] = &Stateful.update;
+    entry.run(ModulePhase.pre_init);
+    assert(state.count == 0);
+    entry.run(ModulePhase.update);
+    assert(state.count == 1);
+
+    entry.state = null;
+    entry.hooks[ModulePhase.update] = &Stateless.update;
+    entry.run(ModulePhase.update);
+    assert(Stateless.count == 1);
 }

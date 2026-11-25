@@ -22,16 +22,22 @@ nothrow @nogc:
 
 package __gshared uint aa55_section_kind;
 
-final class GoodWeModule : Module, ProfileSections
+struct GoodWeModule
 {
-    mixin DeclareModule!"protocol.goodwe";
+    mixin DeclareStaticModule!"protocol.goodwe";
+    static __gshared GoodWeModule module_state;
 nothrow @nogc:
 
-    Socket aa55_socket;
+    Socket aa55_socket = Socket(0);
 
-    override void init()
+    void pre_init()
     {
-        aa55_section_kind = register_profile_section("aa55", this);
+        aa55_socket = Socket.invalid;
+    }
+
+    void init()
+    {
+        aa55_section_kind = register_profile_section("aa55", &this);
 
         g_app.console.register_collection!AA55Client();
         g_app.console.register_collection!GoodWeBinding();
@@ -107,7 +113,7 @@ nothrow @nogc:
         return true;
     }
 
-    override void pre_update()
+    void pre_update()
     {
         poll_aa55();
 

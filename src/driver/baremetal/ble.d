@@ -971,12 +971,12 @@ private:
 }
 
 
-final class BuiltinBLEModule : Module
+struct BuiltinBLEModule
 {
-    mixin DeclareModule!"interface.ble.builtin";
+    mixin DeclareStaticModule!"interface.ble.builtin";
 nothrow @nogc:
 
-    override void pre_init()
+    static void pre_init()
     {
         // builtin radios are fixed hardware; rediscovered each boot, not persisted
         foreach (ubyte i; 0 .. num_ble)
@@ -986,7 +986,7 @@ nothrow @nogc:
         }
     }
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!BuiltinBLEInterface();
     }

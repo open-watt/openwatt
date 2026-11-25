@@ -111,16 +111,22 @@ bool indicating(ref const Indication indication)
     => g_panel.live(indication);
 
 
-final class PanelModule : Module
+struct PanelModule
 {
-    mixin DeclareModule!"panel";
+    mixin DeclareStaticModule!"panel";
+    static __gshared PanelModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void pre_init()
     {
-        g_panel = this;
+        _armed = Indication.init;
+    }
+
+    void init()
+    {
+        g_panel = &this;
         register_element_lifecycle_handler(&element_lifecycle);
-        g_app.console.register_command!identify("/system", this);
+        g_app.console.register_command!identify("/system", &this);
     }
 
     void identify(Session session, Nullable!Duration duration)
@@ -158,7 +164,7 @@ private:
     Element* _status;
     Element* _status_colour;
     Element* _reset_state;
-    Indication _armed;
+    Indication _armed = Indication(0, 0);
     bool _held;
 
     Indication start(Gesture gesture, Duration duration)
@@ -332,4 +338,4 @@ private:
 
 private:
 
-__gshared PanelModule g_panel;
+__gshared PanelModule* g_panel;

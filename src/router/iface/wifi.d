@@ -693,12 +693,12 @@ private:
 }
 
 
-final class WiFiInterfaceModule : Module
+struct WiFiInterfaceModule
 {
-    mixin DeclareModule!"interface.wifi";
+    mixin DeclareStaticModule!"interface.wifi";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         register_packet_codec!Wifi80211();
 

@@ -332,9 +332,10 @@ nothrow @nogc:
     }
 }
 
-final class ZigbeeProtocolModule : Module, ProfileSections
+struct ZigbeeProtocolModule
 {
-    mixin DeclareModule!"protocol.zigbee";
+    mixin DeclareStaticModule!"protocol.zigbee";
+    static __gshared ZigbeeProtocolModule module_state;
 nothrow @nogc:
 
     struct UnknownNode
@@ -350,14 +351,14 @@ nothrow @nogc:
     Map!(uint, NodeMap*) nodes_by_pan;
     Array!UnknownNode unknown_nodes;
 
-    override void init()
+    void init()
     {
         import protocol.zigbee.aps : APSFrame;
 
 //        register_packet_codec!NWKFrame();
         register_packet_codec!APSFrame();
 
-        zb_section_kind = register_profile_section("zb", this);
+        zb_section_kind = register_profile_section("zb", &this);
 
         g_app.console.register_collection!ZigbeeInterface();
         g_app.console.register_collection!ZigbeeNode();
@@ -366,10 +367,10 @@ nothrow @nogc:
         g_app.console.register_collection!ZigbeeEndpoint();
         g_app.console.register_collection!ZigbeeController();
 
-        g_app.console.register_command!scan("/protocol/zigbee", this);
-        g_app.console.register_command!(nodes_print, "nodes")("/protocol/zigbee", this);
-        g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", this);
-        g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", this);
+        g_app.console.register_command!scan("/protocol/zigbee", &this);
+        g_app.console.register_command!(nodes_print, "nodes")("/protocol/zigbee", &this);
+        g_app.console.register_command!(zcl_read, "read")("/protocol/zigbee", &this);
+        g_app.console.register_command!(zcl_write, "write")("/protocol/zigbee", &this);
 
         g_app.schedule(getTime() + liveness_scan_interval, &liveness_scan);
     }
@@ -472,7 +473,7 @@ nothrow @nogc:
         return true;
     }
 
-    override void update()
+    void update()
     {
         // TODO: check; should coordinators or interfaces come first?
         //       does one produce changes which will be consumed by the other?
@@ -512,7 +513,7 @@ nothrow @nogc:
         if (!n)
             return;
         if (n.device)
-            n.device.remove_online_source(cast(void*)this);
+            n.device.remove_online_source(cast(void*)&this);
         if (n.pan_id != 0xFFFF && n.id != 0xFFFE)
             detach_node(n.pan_id, n.id);
         nodes_by_eui.remove(eui);
@@ -597,7 +598,7 @@ nothrow @nogc:
                 continue;
             Duration limit = n.desc.type >= NodeType.end_device ? end_device_quiet_limit : router_quiet_limit;
             if (now - n.last_seen >= limit)
-                n.device.set_online(cast(void*)this, false);
+                n.device.set_online(cast(void*)&this, false);
         }
         g_app.schedule(getTime() + liveness_scan_interval, &liveness_scan);
     }

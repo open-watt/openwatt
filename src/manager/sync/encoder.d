@@ -14,7 +14,7 @@ module manager.sync.encoder;
 // for the property fast path.
 // Inbound: peer hands received bytes to decode_and_dispatch, which reads the
 // kind tag, decodes fields, and calls the matching inbound_* free function in
-// manager.sync (the SyncModule namespace).
+// manager.sync (the SyncModule* namespace).
 
 import urt.log;
 import urt.meta.enuminfo : VoidEnumInfo;

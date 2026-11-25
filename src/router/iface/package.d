@@ -1237,12 +1237,13 @@ private CID scope_cid(uint scope_id) pure
 private __gshared immutable InetScopeProvider g_scope_provider = InetScopeProvider(&scope_to_native, &scope_from_native, &scope_name, &scope_parse);
 
 
-final class InterfaceModule : Module
+struct InterfaceModule
 {
-    mixin DeclareModule!"interface";
+    mixin DeclareStaticModule!"interface";
+    static __gshared InterfaceModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
         g_app.register_bitfield!InterfaceCaps();
         g_app.register_enum!ConnectionStatus();
@@ -1252,7 +1253,7 @@ nothrow @nogc:
         g_app.console.register_collection!BaseInterface();
     }
 
-    override void init()
+    void init()
     {
         register_inet_scope_provider(&g_scope_provider);
         register_element_lifecycle_handler(&led_created);
@@ -1265,15 +1266,15 @@ nothrow @nogc:
         g_app.console.register_collection!VLANInterface();
     }
 
-    override void post_init()
+    void post_init()
     {
         // post_init: the platform ethernet collections own the scope by now, so these extend it
-        g_app.console.register_command!(ping, "ping")("/", this);
-        g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", this);
-        g_app.console.register_command!locate("/interface", this);
+        g_app.console.register_command!(ping, "ping")("/", &this);
+        g_app.console.register_command!(mac_discover, "discover")("/interface/ethernet", &this);
+        g_app.console.register_command!locate("/interface", &this);
     }
 
-    override void deinit()
+    void deinit()
     {
         version (UseInternalIPStack) {}
         else
@@ -1283,7 +1284,7 @@ nothrow @nogc:
         register_inet_scope_provider(null);
     }
 
-    override void update()
+    void update()
     {
         Collection!BaseInterface().update_all();
         update_udp_endpoints();
@@ -1409,7 +1410,7 @@ nothrow @nogc:
         foreach (text; ["", "host.example", "192.0.2.1:80", "[::1]:80", "fe80::1%eth0", "fe80::1%", "fe80::1%3:80", "2001:db8::1junk", "02:13:37:aa:bb:64junk"])
             assert(!parse_ping_address(text, address));
 
-        InterfaceModule module_ = alloc!InterfaceModule(null);
+        InterfaceModule* module_ = alloc!InterfaceModule();
         scope(exit) free(module_);
         Console* console = alloc!Console(null, StringLit!"test.ping-dispatch");
         console.register_command!(ping, "ping")("/", module_);
@@ -1652,7 +1653,7 @@ nothrow @nogc:
         }
     }
 
-    final String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)
+    String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)
     {
         if (name.empty)
             name = Collection!BaseInterface().generate_name(default_name_prefix);

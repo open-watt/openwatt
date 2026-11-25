@@ -117,7 +117,7 @@ private:
 
 private struct LogConsumerSlot
 {
-    LogFilter filter;
+    LogFilter filter = LogFilter(Severity.emergency);
     StoredLogMessage* cursor;
     StoredLogMessage* current;
     uint lost;          // messages evicted before this consumer read them, until it reports them
@@ -125,9 +125,10 @@ private struct LogConsumerSlot
 }
 
 
-final class LogModule : Module
+struct LogModule
 {
-    mixin DeclareModule!"log";
+    mixin DeclareStaticModule!"log";
+    static __gshared LogModule module_state;
 nothrow @nogc:
 
     enum max_consumers = 16;
@@ -145,7 +146,15 @@ nothrow @nogc:
         enum default_history_messages = max_history_messages;
     }
 
-    override void init()
+    void pre_init()
+    {
+        _ingress_sink = LogSinkHandle.init;
+        _history_limit = default_history_messages;
+        _history_max_severity = Severity.info;
+        _global_max_severity = Severity.trace;
+    }
+
+    void init()
     {
         g_app.console.register_command("/log", Command(&log_desc!("emergency", Severity.emergency)));
         g_app.console.register_command("/log", Command(&log_desc!("alert", Severity.alert)));
@@ -156,29 +165,29 @@ nothrow @nogc:
         g_app.console.register_command("/log", Command(&log_desc!("info", Severity.info)));
         g_app.console.register_command("/log", Command(&log_desc!("debug", Severity.debug_)));
         g_app.console.register_command("/log", Command(&log_desc!("trace", Severity.trace)));
-        g_app.console.register_command!(log_print, "print")("/log", this);
-        g_app.console.register_command!(history_get, "get")("/log/history", this);
-        g_app.console.register_command!(history_set, "set")("/log/history", this);
-        g_app.console.register_command!(history_clear, "clear")("/log/history", this);
+        g_app.console.register_command!(log_print, "print")("/log", &this);
+        g_app.console.register_command!(history_get, "get")("/log/history", &this);
+        g_app.console.register_command!(history_set, "set")("/log/history", &this);
+        g_app.console.register_command!(history_clear, "clear")("/log/history", &this);
         g_app.register_enum!LogFormat();
         g_app.register_enum!LogLineEnding();
         g_app.console.register_collection!LogSink();
 
         resize_history(_history_limit);
-        _ingress_sink = register_log_sink(&ingress, cast(void*)this, LogFilter(Severity.trace));
+        _ingress_sink = register_log_sink(&ingress, cast(void*)&this, LogFilter(Severity.trace));
         recalc_ingress_filter();
 
         bool registered = register_reclaimer(&reclaim_history, history_reclaim_willingness, false);
         debug assert(registered, "log history reclaimer registration failed");
     }
 
-    override void update()
+    void update()
     {
         Collection!LogSink().update_all();
         trim_history();
     }
 
-    override void deinit()
+    void deinit()
     {
         unregister_reclaimer(&reclaim_history);
         if (_ingress_sink.valid)
@@ -389,21 +398,21 @@ private:
     StoredLogMessage* _records_head;
     StoredLogMessage* _records_tail;
     StoredLogMessage* _history_head;
-    LogSinkHandle _ingress_sink;
+    LogSinkHandle _ingress_sink = LogSinkHandle(0);
     String _history_tag;
     Duration _history_max_age;
     void* _source;
     uint _delivery_count;
     uint _delivery_dropped;
     uint _history_count;
-    uint _history_limit = default_history_messages;
-    Severity _history_max_severity = Severity.info;
-    Severity _global_max_severity = Severity.trace;
+    uint _history_limit;
+    Severity _history_max_severity;
+    Severity _global_max_severity;
     bool _history_reading;
 
     static void ingress(void* context, scope ref const LogMessage msg)
     {
-        (cast(LogModule)context).enqueue(msg);
+        (cast(LogModule*)context).enqueue(msg);
     }
 
     void enqueue(scope ref const LogMessage msg)
@@ -761,7 +770,7 @@ nothrow @nogc:
         if (!s || !s.running)
             return;
 
-        LogModule log_module = get_module!LogModule;
+        LogModule* log_module = get_module!LogModule;
         while (true)
         {
             if (_line.length == 0)
@@ -1203,7 +1212,7 @@ protected:
     }
 
 private:
-    LogModule _log_module;
+    LogModule* _log_module;
     LogConsumerHandle _consumer;
     Array!RetainedLogMessage _messages;
     String _tag;
@@ -1331,7 +1340,8 @@ unittest
     const(char)[] decorated = format_log_for_session(restored, ClientFeatures.xterm);
     assert(decorated.contains("\x1b["));
 
-    auto module_ = alloc!LogModule(null);
+    auto module_ = alloc!LogModule();
+    module_.pre_init();
     scope (exit)
     {
         module_.deinit();

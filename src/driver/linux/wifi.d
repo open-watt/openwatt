@@ -2253,25 +2253,26 @@ private:
 // the (Radio, WLAN) pairs in sync with the kernel's wifi netdevs.
 // ---------------------------------------------------------------------------
 
-final class LinuxWlanModule : Module
+struct LinuxWlanModule
 {
-    mixin DeclareModule!"interface.wifi.linux";
+    mixin DeclareStaticModule!"interface.wifi.linux";
+    static __gshared LinuxWlanModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
         subscribe_link_changed(&on_link_changed);
     }
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!LinuxWifiRadio();
         g_app.console.register_collection!LinuxWlan();
         g_app.console.register_collection!LinuxAP();
-        g_app.console.register_command!(scan_cmd, "scan")("/interface/wifi", this);
+        g_app.console.register_command!(scan_cmd, "scan")("/interface/wifi", &this);
     }
 
-    override void update()
+    void update()
     {
         // Defer the first adapter discovery until after startup.conf has run, so
         // an operator-configured radio (e.g. `/interface/wifi/add adapter=wlan0`)

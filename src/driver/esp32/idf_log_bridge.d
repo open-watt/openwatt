@@ -23,12 +23,13 @@ nothrow @nogc:
 
 version (ESPIDFLogBridge)
 {
-class IDFLogBridgeModule : Module
+struct IDFLogBridgeModule
 {
-    mixin DeclareModule!"esp-idf-log";
+    mixin DeclareStaticModule!"esp-idf-log";
+    static __gshared IDFLogBridgeModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         void[] memory = alloc(LineAssembler.sizeof * max_sources,
                                                  LineAssembler.alignof);
@@ -40,7 +41,7 @@ nothrow @nogc:
         _lines = cast(LineAssembler*)memory.ptr;
         reset_lines();
         g_drain_doorbell = register_doorbell(&drain_bridge, EventPriority.bulk);
-        atomicStore!(MemoryOrder.release)(g_bridge, cast(size_t)cast(void*)this);
+        atomicStore!(MemoryOrder.release)(g_bridge, cast(size_t)cast(void*)&this);
         idf_log_set_ready_callback(&idf_log_ready);
         _open = idf_log_open();
         if (!_open)
@@ -51,7 +52,7 @@ nothrow @nogc:
         }
     }
 
-    override void deinit()
+    void deinit()
     {
         if (_open)
             idf_log_close();
@@ -211,7 +212,7 @@ void drain_bridge(MonoTime when)
 {
     size_t bridge = atomicLoad!(MemoryOrder.acquire)(g_bridge);
     if (bridge != 0)
-        (cast(IDFLogBridgeModule)cast(void*)bridge).drain(when);
+        (cast(IDFLogBridgeModule*)cast(void*)bridge).drain(when);
 }
 
 void idf_log_ready()

@@ -15,17 +15,18 @@ import manager.signal;
 nothrow @nogc:
 
 
-final class ObjectSignalModule : Module, ISignalProvider
+struct ObjectSignalModule
 {
-    mixin DeclareModule!"object-signal";
+    mixin DeclareStaticModule!"object-signal";
+    static __gshared ObjectSignalModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
-        g_app.register_signal_provider(StringLit!"object", this);
+        g_app.register_signal_provider(StringLit!"object", signal_provider(&this));
     }
 
-    override StringResult validate(ref const SignalUri uri) const
+    StringResult validate(ref const SignalUri uri) const
     {
         if (uri.body.length == 0)
             return StringResult("object signal needs an instance name");
@@ -35,7 +36,7 @@ nothrow @nogc:
         return StringResult.success;
     }
 
-    override StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
+    StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
     {
         StringResult valid = validate(uri);
         if (!valid)
@@ -81,7 +82,7 @@ nothrow @nogc:
         return StringResult.success;
     }
 
-    override void unsubscribe(SignalSub handle)
+    void unsubscribe(SignalSub handle)
     {
         ObjectSignalSub s = cast(ObjectSignalSub)cast(void*)handle;
         if (s.initial_scheduled)
@@ -95,7 +96,7 @@ nothrow @nogc:
         free(s);
     }
 
-    override SysTime next_run(SignalSub) const
+    SysTime next_run(SignalSub) const
         => SysTime();
 }
 
@@ -113,7 +114,7 @@ nothrow @nogc:
     bool initial_scheduled;
 
     override ISignalProvider provider()
-        => get_module!ObjectSignalModule;
+        => signal_provider(get_module!ObjectSignalModule);
 
     void on_state(ActiveObject, StateSignal value)
     {

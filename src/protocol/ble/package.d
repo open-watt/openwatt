@@ -33,29 +33,30 @@ nothrow @nogc:
 
 package __gshared uint ble_section_kind;
 
-final class BLEModule : Module, ProfileSections
+struct BLEModule
 {
-    mixin DeclareModule!"protocol.ble";
+    mixin DeclareStaticModule!"protocol.ble";
+    static __gshared BLEModule module_state;
 nothrow @nogc:
 
     alias log = Log!"ble";
 
     Map!(MACAddress, BLEAdvEntry*) devices;
 
-    override void init()
+    void init()
     {
         _service_doorbell = register_doorbell(&service_radios, EventPriority.bulk);
         register_packet_codec!BLEFrame();
         register_frame_handler(PacketType.ble, &on_ble_frame);
 
-        ble_section_kind = register_profile_section("ble", this);
+        ble_section_kind = register_profile_section("ble", &this);
 
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
         g_app.console.register_collection!BLESerialStream();
-        g_app.console.register_command!(print_devices, "print")("/protocol/ble/device", this);
-        g_app.console.register_command!(cmd_read, "read")("/protocol/ble/client", this);
-        g_app.console.register_command!(cmd_gatt, "gatt")("/protocol/ble/client", this);
+        g_app.console.register_command!(print_devices, "print")("/protocol/ble/device", &this);
+        g_app.console.register_command!(cmd_read, "read")("/protocol/ble/client", &this);
+        g_app.console.register_command!(cmd_gatt, "gatt")("/protocol/ble/client", &this);
     }
 
     uint element_size(uint)
@@ -115,7 +116,7 @@ nothrow @nogc:
         return true;
     }
 
-    override void update()
+    void update()
     {
         Collection!BLEClient().update_all();
         expire_devices();

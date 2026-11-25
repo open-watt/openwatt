@@ -51,20 +51,21 @@ unittest
     assert(!translate_legacy_byte_type("u16", buffer, length));
 }
 
-final class ModbusProtocolModule : Module, ProfileSections
+struct ModbusProtocolModule
 {
-    mixin DeclareModule!"protocol.mb";
+    mixin DeclareStaticModule!"protocol.mb";
+    static __gshared ModbusProtocolModule module_state;
 nothrow @nogc:
 
     Map!(ubyte, ServerMap) remote_servers;
     ubyte[32] _address_in_use;
 
-    override void init()
+    void init()
     {
         register_packet_codec!ModbusFrame();
 
-        modbus_reg_section_kind = register_profile_section("reg", this);
-        modbus_mb_section_kind = register_profile_section("mb", this);
+        modbus_reg_section_kind = register_profile_section("reg", &this);
+        modbus_mb_section_kind = register_profile_section("mb", &this);
 
         g_app.register_enum!ModbusProtocol();
         g_app.register_enum!SunSpecInverterState();
@@ -76,12 +77,12 @@ nothrow @nogc:
         g_app.console.register_collection!SunspecBinding();
 
         // TODO: should we relocate this command?
-        g_app.console.register_command!(remote_server_add, "add")("/interface/modbus/remote-server", this);
+        g_app.console.register_command!(remote_server_add, "add")("/interface/modbus/remote-server", &this);
 
-        g_app.console.register_command!(request_raw, "raw")("/protocol/modbus/node/request", this);
-        g_app.console.register_command!(request_read, "read")("/protocol/modbus/node/request", this);
-        g_app.console.register_command!(request_write, "write")("/protocol/modbus/node/request", this);
-        g_app.console.register_command!(request_read_device_id, "read-device-id")("/protocol/modbus/node/request", this);
+        g_app.console.register_command!(request_raw, "raw")("/protocol/modbus/node/request", &this);
+        g_app.console.register_command!(request_read, "read")("/protocol/modbus/node/request", &this);
+        g_app.console.register_command!(request_write, "write")("/protocol/modbus/node/request", &this);
+        g_app.console.register_command!(request_read_device_id, "read-device-id")("/protocol/modbus/node/request", &this);
     }
 
     uint element_size(uint)
@@ -150,7 +151,7 @@ nothrow @nogc:
         return true;
     }
 
-    override void update()
+    void update()
     {
         Collection!ModbusNode().update_all();
     }
@@ -210,12 +211,12 @@ nothrow @nogc:
         assert(false, "No available device addresses!");
     }
 
-    final void release_universal_address(ubyte addr)
+    void release_universal_address(ubyte addr)
     {
         _address_in_use[addr / 8] &= ~cast(ubyte)(1 << (addr % 8));
     }
 
-    final bool try_claim_universal_address(ubyte addr)
+    bool try_claim_universal_address(ubyte addr)
     {
         return _try_claim(addr);
     }
@@ -259,7 +260,7 @@ nothrow @nogc:
         return universal_address in remote_servers;
     }
 
-    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, Nullable!(const(char)[]) profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
+    void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, Nullable!(const(char)[]) profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
     {
         if (!_interface)
         {

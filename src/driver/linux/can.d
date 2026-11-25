@@ -22,12 +22,13 @@ import router.port;
 nothrow @nogc:
 
 
-final class LinuxSocketCANModule : Module
+struct LinuxSocketCANModule
 {
-    mixin DeclareModule!"interface.can.linux";
+    mixin DeclareStaticModule!"interface.can.linux";
+    static __gshared LinuxSocketCANModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
         subscribe_link_changed(&on_link_changed);
         sync_adapters();

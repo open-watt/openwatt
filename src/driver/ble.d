@@ -2,7 +2,7 @@ module driver.ble;
 
 // Platform-selected BLE driver backend(s). manager.plugin registers
 // `driver.ble` and the conditional aliases here resolve to the right
-// concrete *Module class.
+// concrete *Module struct.
 //
 // The builtin backend covers any platform whose BLE is provided by the
 // urt driver layer (windows WinRT, esp32 NimBLE). A linux kernel

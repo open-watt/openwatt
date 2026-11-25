@@ -1192,12 +1192,13 @@ private:
     }
 }
 
-final class BridgeInterfaceModule : Module
+struct BridgeInterfaceModule
 {
-    mixin DeclareModule!"interface.bridge";
+    mixin DeclareStaticModule!"interface.bridge";
+    static __gshared BridgeInterfaceModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!BridgeInterface();
         g_app.console.register_collection!BridgePort();
@@ -1205,12 +1206,12 @@ nothrow @nogc:
         register_object_lifecycle_handler(&endpoint_changed);
     }
 
-    override void update()
+    void update()
     {
         Collection!BridgePort().update_all();
     }
 
-    override void deinit()
+    void deinit()
     {
         foreach (port; Collection!BridgePort().values)
             port.unsubscribe(&port_changed);
@@ -1308,7 +1309,7 @@ unittest
         uint sends;
     }
 
-    auto module_ = alloc!BridgeInterfaceModule(null);
+    auto module_ = alloc!BridgeInterfaceModule();
     Collection!BridgePort().subscribe(&module_.ports_changed);
     register_object_lifecycle_handler(&module_.endpoint_changed);
     scope(exit)

@@ -160,12 +160,12 @@ private:
 }
 
 
-final class BridgeStreamModule : Module
+struct BridgeStreamModule
 {
-    mixin DeclareModule!"stream.bridge";
+    mixin DeclareStaticModule!"stream.bridge";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!BridgeStream();
     }

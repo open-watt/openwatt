@@ -282,17 +282,17 @@ private:
 }
 
 
-final class OTAModule : Module
+struct OTAModule
 {
-    mixin DeclareModule!"apps.ota";
+    mixin DeclareStaticModule!"apps.ota";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!OTAUpdater();
     }
 
-    override void update()
+    static void update()
     {
         Collection!OTAUpdater().update_all();
     }

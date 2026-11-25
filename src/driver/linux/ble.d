@@ -82,7 +82,7 @@ protected:
 
     override CompletionStatus startup()
     {
-        LinuxBLEModule m = get_module!LinuxBLEModule;
+        LinuxBLEModule* m = get_module!LinuxBLEModule;
         if (!m.mgmt_available)
         {
             log.error("BLE management socket unavailable");
@@ -139,7 +139,7 @@ protected:
             _connect_tag = -1;
         }
 
-        LinuxBLEModule m = get_module!LinuxBLEModule;
+        LinuxBLEModule* m = get_module!LinuxBLEModule;
         if (m.mgmt_available)
         {
             if (_discovering)
@@ -551,13 +551,15 @@ private:
 // the LinuxBLEInterface collection in sync, mirroring driver.linux.ethernet.
 // ---------------------------------------------------------------------------
 
-final class LinuxBLEModule : Module
+struct LinuxBLEModule
 {
-    mixin DeclareModule!"interface.ble";
+    mixin DeclareStaticModule!"interface.ble";
+    static __gshared LinuxBLEModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
+        _fd = -1;
         _fd = socket(af_bluetooth, sock_raw, btproto_hci);
         if (_fd < 0)
         {
@@ -597,12 +599,12 @@ nothrow @nogc:
         }
     }
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!LinuxBLEInterface();
     }
 
-    override void deinit()
+    void deinit()
     {
         remove_fd_watcher(&service_sockets);
         if (_fd >= 0)
@@ -664,7 +666,7 @@ package:
 
 private:
 
-    int _fd = -1;
+    int _fd;
 
     // fdwatch hooks: drain everything (main loop), and contribute our fds
     void service_sockets()

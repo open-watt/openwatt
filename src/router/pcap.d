@@ -261,9 +261,10 @@ private:
 }
 
 
-final class PcapModule : Module
+struct PcapModule
 {
-    mixin DeclareModule!"manager.pcap";
+    mixin DeclareStaticModule!"manager.pcap";
+    static __gshared PcapModule module_state;
 nothrow @nogc:
 
     Array!(PcapInterface*) interfaces;
@@ -276,20 +277,20 @@ nothrow @nogc:
         return null;
     }
 
-    override void init()
+    void init()
     {
-        g_app.console.register_command!add("/tools/pcap", this);
+        g_app.console.register_command!add("/tools/pcap", &this);
         static if (has_ip)
             g_app.console.register_collection!PCAPServer();
     }
 
-    override void update()
+    void update()
     {
         static if (has_ip)
             Collection!PCAPServer().update_all();
     }
 
-    override void post_update()
+    void post_update()
     {
         foreach (PcapInterface* pcap; interfaces)
             pcap.update();

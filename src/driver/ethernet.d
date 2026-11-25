@@ -2,7 +2,7 @@ module driver.ethernet;
 
 // Platform-selected ethernet driver backend(s). manager.plugin registers
 // `driver.ethernet` and the version ladder here resolves to the right
-// concrete *Module class. Add entries below as new backends land
+// concrete *Module struct. Add entries below as new backends land
 // (driver/posix/ethernet.d, driver/baremetal/ethernet.d, ...).
 
 version (Windows)

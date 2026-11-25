@@ -180,12 +180,12 @@ private:
 }
 
 
-final class XramModule : Module
+struct XramModule
 {
-    mixin DeclareModule!"interface.xram";
+    mixin DeclareStaticModule!"interface.xram";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!XramInterface();
         XramInterface._doorbell = register_doorbell(&XramInterface.service_links, EventPriority.bulk);

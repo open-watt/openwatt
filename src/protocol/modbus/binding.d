@@ -1171,7 +1171,7 @@ private:
         import urt.mem : alloc, free;
 
         if (!modbus_reg_section_kind)
-            modbus_reg_section_kind = register_profile_section("reg", alloc!ModbusProtocolModule(null));
+            modbus_reg_section_kind = register_profile_section("reg", alloc!ModbusProtocolModule());
         Profile* profile = parse_profile("elements:\n\treg: 40000, u16\tdesc: level\n", "modbus-first-sample");
         assert(profile);
         scope(exit) free(profile);

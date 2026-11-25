@@ -261,18 +261,19 @@ private:
 // the LinuxRawEthernet collection in sync with the kernel's netdev list.
 // ---------------------------------------------------------------------------
 
-final class LinuxRawEthernetModule : Module
+struct LinuxRawEthernetModule
 {
-    mixin DeclareModule!"interface.ethernet.linux";
+    mixin DeclareStaticModule!"interface.ethernet.linux";
+    static __gshared LinuxRawEthernetModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
         subscribe_link_changed(&on_link_changed);
         sync_adapters();
     }
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!LinuxRawEthernet();
     }

@@ -1560,12 +1560,12 @@ private:
 }
 
 
-final class CPCProtocolModule : Module
+struct CPCProtocolModule
 {
-    mixin DeclareModule!"protocol.cpc";
+    mixin DeclareStaticModule!"protocol.cpc";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!CPCEndpointId();
 

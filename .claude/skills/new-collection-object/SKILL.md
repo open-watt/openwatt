@@ -97,20 +97,21 @@ private:
     // Member variables
 }
 
-// Module class
-class YourModule : Module
+// Module struct
+struct YourModule
 {
-    mixin DeclareModule!"[layer].[module]";
+    mixin DeclareStaticModule!"[layer].[module]";
+    static __gshared YourModule module_state;
 nothrow @nogc:
 
     Collection!YourObject objects;
 
-    override void init()
+    void init()
     {
         g_app.console.registerCollection("/[category]/[type]", objects);
     }
 
-    override void update()
+    void update()
     {
         objects.update_all();
     }
@@ -413,12 +414,13 @@ This determines:
 - `StringLit!"modbus"` → `/interface/modbus`
 - `StringLit!"mqtt-broker"` → `/protocol/mqtt/broker`
 
-### 6. Module Class Pattern
+### 6. Module Struct Pattern
 
 ```d
-class YourModule : Module
+struct YourModule
 {
-    mixin DeclareModule!"layer.module";
+    mixin DeclareStaticModule!"layer.module";
+    static __gshared YourModule module_state;
 nothrow @nogc:
 
     // Collections
@@ -428,28 +430,28 @@ nothrow @nogc:
     // Non-collection objects (if any)
     Map!(const(char)[], YourClient) clients;
 
-    override void init()
+    void init()
     {
         // Register collections with console
         g_app.console.registerCollection("/stream/your-type", streams);
         g_app.console.registerCollection("/interface/your-type", interfaces);
     }
 
-    override void pre_update()
+    void pre_update()
     {
         // Update all collection objects
         streams.update_all();
         interfaces.update_all();
     }
 
-    override void update()
+    void update()
     {
         // Update non-collection objects
         foreach(client; clients.values)
             client.update();
     }
 
-    override void post_update()
+    void post_update()
     {
         // Post-processing if needed
     }
@@ -560,7 +562,7 @@ import manager;            // Application, g_app
 import manager.base;       // BaseObject, ObjectFlags
 import manager.collection; // Collection, collection_type_info
 import manager.console;    // Console registration
-import manager.plugin;     // Module, DeclareModule
+import manager.plugin;     // DeclareStaticModule
 ```
 
 **Common additional imports:**
@@ -603,8 +605,8 @@ When creating a new Collection-managed object, ensure:
 - [ ] `startup()` handles async initialization correctly
 - [ ] `shutdown()` cleans up all resources (cannot fail)
 - [ ] `update()` processes per-frame logic
-- [ ] Module class extends `Module`
-- [ ] Module uses `mixin DeclareModule!"path";`
+- [ ] Module state lives in a zero-initialized struct
+- [ ] Module uses `mixin DeclareStaticModule!"path";`
 - [ ] Collections registered in `init()`
 - [ ] `update_all()` called appropriately
 - [ ] Module registered in `src/manager/plugin.d`
@@ -711,19 +713,20 @@ private:
     uint _timeout = 5000;
 }
 
-class ExampleStreamModule : Module
+struct ExampleStreamModule
 {
-    mixin DeclareModule!"stream.example";
+    mixin DeclareStaticModule!"stream.example";
+    static __gshared ExampleStreamModule module_state;
 nothrow @nogc:
 
     Collection!ExampleStream streams;
 
-    override void init()
+    void init()
     {
         g_app.console.registerCollection("/stream/example", streams);
     }
 
-    override void pre_update()
+    void pre_update()
     {
         streams.update_all();
     }
@@ -801,19 +804,20 @@ private:
     ObjectRef!Stream _stream;
 }
 
-class ExampleInterfaceModule : Module
+struct ExampleInterfaceModule
 {
-    mixin DeclareModule!"iface.example";
+    mixin DeclareStaticModule!"iface.example";
+    static __gshared ExampleInterfaceModule module_state;
 nothrow @nogc:
 
     Collection!ExampleInterface interfaces;
 
-    override void init()
+    void init()
     {
         g_app.console.registerCollection("/interface/example", interfaces);
     }
 
-    override void pre_update()
+    void pre_update()
     {
         interfaces.update_all();
     }
@@ -894,19 +898,20 @@ private:
     uint _max_clients = 10;
 }
 
-class ExampleProtocolModule : Module
+struct ExampleProtocolModule
 {
-    mixin DeclareModule!"protocol.example";
+    mixin DeclareStaticModule!"protocol.example";
+    static __gshared ExampleProtocolModule module_state;
 nothrow @nogc:
 
     Collection!ExampleBroker brokers;
 
-    override void init()
+    void init()
     {
         g_app.console.registerCollection("/protocol/example/broker", brokers);
     }
 
-    override void pre_update()
+    void pre_update()
     {
         brokers.update_all();
     }

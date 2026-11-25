@@ -292,7 +292,7 @@ private:
         import protocol.ble : BLEModule, ble_section_kind;
 
         if (!ble_section_kind)
-            ble_section_kind = register_profile_section("ble", alloc!BLEModule(null));
+            ble_section_kind = register_profile_section("ble", alloc!BLEModule());
         Profile* profile = parse_profile("elements:\n\tble: 180F, 2A19, u8\tdesc: level\n", "ble-first-sample");
         assert(profile);
         scope(exit) free(profile);

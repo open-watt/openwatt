@@ -13,17 +13,17 @@ import protocol.spinel.client;
 nothrow @nogc:
 
 
-final class SpinelProtocolModule : Module
+struct SpinelProtocolModule
 {
-    mixin DeclareModule!"protocol.spinel";
+    mixin DeclareStaticModule!"protocol.spinel";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!SpinelClient();
     }
 
-    override void update()
+    static void update()
     {
         Collection!SpinelClient().update_all();
     }
