@@ -172,16 +172,17 @@ final class WindowsPcapEthernetModule : Module
     mixin DeclareModule!"ethernet.pcap";
 nothrow @nogc:
 
-    override void pre_init()
-    {
-        g_adapter_watcher.scan_sync();
-        drain_events();
-    }
-
     override void init()
     {
         g_app.console.register_collection!WindowsPcapEthernet();
-        g_adapter_watcher.start();
+        g_adapter_watcher.acquire();
+        drain_events();
+    }
+
+    override void deinit()
+    {
+        g_adapter_watcher.release();
+        Collection!WindowsPcapEthernet().destroy_dynamic();
     }
 
     override void update()
@@ -211,22 +212,26 @@ private:
         final switch (ev.kind) with (AdapterEventKind)
         {
             case added:
+                port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
+                foreach (e; Collection!WindowsPcapEthernet().values)
+                    if (e.adapter == ev.name)
+                        return;
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", ev.description, "\" (", ev.name, ")");
-                port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
-                auto iface = Collection!WindowsPcapEthernet().create(iface_name);
+                auto iface = Collection!WindowsPcapEthernet().create(iface_name, ObjectFlags.dynamic);
                 iface.adapter = ev.name;
                 iface.comment = ev.description.make_string();
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
                 return;
             case removed:
+                port_remove(PortKind.ethernet, tconcat("windows:ethernet:", ev.name));
                 foreach (e; Collection!WindowsPcapEthernet().values)
                 {
-                    if (e.adapter == ev.name)
+                    if ((e.flags & ObjectFlags.dynamic) && e.adapter == ev.name)
                     {
                         writeInfo("Ethernet adapter gone: ", e.adapter);
-                        port_remove(PortKind.ethernet, tconcat("windows:ethernet:", ev.name));
-                        Collection!WindowsPcapEthernet().remove(e);
+                        BaseObject iface = e;
+                        iface.destroy();
                         return;
                     }
                 }
@@ -254,4 +259,83 @@ private:
         }
         return tconcat("ether", 999);
     }
+}
+
+
+unittest
+{
+    import manager : create_application, shutdown_application;
+    import manager.base : ActiveObject, StateSignal, register_object_state_handler, unregister_object_state_handler;
+    import manager.saved_config : export_all;
+
+    struct Observe
+    {
+        CID target;
+        bool destroyed;
+
+        void state(ActiveObject obj, StateSignal signal) nothrow @nogc
+        {
+            if (obj.id == target && signal == StateSignal.destroyed)
+                destroyed = true;
+        }
+    }
+
+    CID discovered;
+    {
+        create_application();
+        scope(exit) shutdown_application();
+        auto mod = get_module!WindowsPcapEthernetModule();
+        auto manual = Collection!WindowsPcapEthernet().create("test-configured-ethernet");
+        scope(exit) manual.destroy();
+        enum manual_adapter = "test-configured-ethernet-adapter";
+        manual.adapter = manual_adapter;
+        AdapterEvent ev;
+        ev.name_buf[0 .. manual_adapter.length] = manual_adapter;
+        ev.name_len = manual_adapter.length;
+        mod.apply_event(ev);
+        size_t matches;
+        foreach (e; Collection!WindowsPcapEthernet().values)
+            matches += e.adapter == manual_adapter;
+        assert(matches == 1);
+        ev.kind = AdapterEventKind.removed;
+        mod.apply_event(ev);
+        assert(get_item(manual.id) is manual);
+
+        enum adapter = "test-discovered-ethernet-adapter";
+        ev.kind = AdapterEventKind.added;
+        ev.name_buf[0 .. adapter.length] = adapter;
+        ev.name_len = adapter.length;
+        mod.apply_event(ev);
+        WindowsPcapEthernet owned;
+        foreach (e; Collection!WindowsPcapEthernet().values)
+            if (e.adapter == adapter)
+                owned = e;
+        assert(owned && (owned.flags & ObjectFlags.dynamic));
+        assert(owned.name("test-discovered-ethernet-renamed") is null);
+        discovered = owned.id;
+        mod.apply_event(ev);
+        matches = 0;
+        foreach (e; Collection!WindowsPcapEthernet().values)
+            matches += e.adapter == adapter;
+        assert(matches == 1);
+
+        MutableString!0 text;
+        export_all(text);
+        assert(text[].contains("/interface/ethernet/add name=test-configured-ethernet "));
+        assert(!text[].contains("/add name=test-discovered-ethernet-renamed "));
+        Observe observe;
+        observe.target = discovered;
+        register_object_state_handler(&observe.state);
+        scope(exit) unregister_object_state_handler(&observe.state);
+        ev.kind = AdapterEventKind.removed;
+        mod.apply_event(ev);
+        assert(observe.destroyed && get_item(discovered) is null);
+        ev.kind = AdapterEventKind.added;
+        mod.apply_event(ev);
+        foreach (e; Collection!WindowsPcapEthernet().values)
+            if (e.adapter == adapter)
+                discovered = e.id;
+        assert(get_item(discovered) !is null);
+    }
+    assert(get_item(discovered) is null);
 }

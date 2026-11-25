@@ -586,12 +586,17 @@ nothrow @nogc:
         return true;
     }
 
-    void register_module(Module mod)
+    void register_module(Module mod, ref ushort type_slot)
     {
         import urt.string.format;
 
         foreach (m; modules)
             assert(m.module_name[] != mod.module_name, tconcat("Module '", mod.module_name, "' already registered!"));
+
+        assert(modules.length < ushort.max);
+        if (!type_slot)
+            type_slot = cast(ushort)(modules.length + 1);
+        assert(type_slot == modules.length + 1, "Module registration order changed");
 
         mod.module_id = modules.length;
         modules ~= mod;
@@ -605,10 +610,11 @@ nothrow @nogc:
         return null;
     }
 
-    Mod module_instance(Mod)() pure
+    Mod module_instance(Mod)()
         if (is(Mod : Module))
     {
-        return cast(Mod)cast(void*)module_instance(Mod.ModuleName);
+        size_t index = cast(size_t)module_slot!Mod - 1;
+        return index < modules.length ? cast(Mod)cast(void*)modules[index] : null;
     }
 
     bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
@@ -2697,11 +2703,15 @@ unittest
 
     Application first = create_application();
     LogModule previous = get_module!LogModule();
-    assert(previous is first.module_instance!LogModule());
+    assert(previous is cast(LogModule)cast(void*)first.module_instance(LogModule.ModuleName));
+    assert(first.module_instance!Module() is null);
+    ushort log_slot = module_slot!LogModule;
+    assert(log_slot == previous.module_id + 1);
     shutdown_application();
     assert(g_app is null);
 
     Application second = create_application();
     scope(exit) shutdown_application();
-    assert(get_module!LogModule() is second.module_instance!LogModule());
+    assert(get_module!LogModule() is cast(LogModule)cast(void*)second.module_instance(LogModule.ModuleName));
+    assert(module_slot!LogModule == log_slot);
 }

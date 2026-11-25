@@ -309,6 +309,14 @@ nothrow @nogc:
         table.notify(item, CollectionEvent.added);
     }
 
+    pragma(inline, false)
+    void destroy_dynamic()
+    {
+        foreach (obj; values)
+            if (obj.flags & ObjectFlags.dynamic)
+                obj.destroy();
+    }
+
     void remove(BaseObject item)
     {
         if (table.get(item._id) is item)

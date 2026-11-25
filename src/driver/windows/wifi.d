@@ -472,17 +472,19 @@ final class WindowsWlanModule : Module
     mixin DeclareModule!"wifi.windows";
 nothrow @nogc:
 
-    override void pre_init()
-    {
-        g_adapter_watcher.scan_sync();
-        drain_events();
-    }
-
     override void init()
     {
         g_app.console.register_collection!WindowsWifiRadio();
         g_app.console.register_collection!WindowsWlan();
-        g_adapter_watcher.start();
+        g_adapter_watcher.acquire();
+        drain_events();
+    }
+
+    override void deinit()
+    {
+        g_adapter_watcher.release();
+        Collection!WindowsWlan().destroy_dynamic();
+        Collection!WindowsWifiRadio().destroy_dynamic();
     }
 
     override void update()
@@ -514,34 +516,38 @@ private:
         final switch (ev.kind) with (AdapterEventKind)
         {
             case added:
+                port_add(PortKind.wifi, tconcat("windows:wifi:", ev.name), ev.name, ev.name, ModuleName, ev.description);
+                foreach (r; Collection!WindowsWifiRadio().values)
+                    if (r.adapter == ev.name)
+                        return;
                 // Radio identity == OS adapter identity. The paired WLAN inherits its
                 // adapter via the radio at startup (don't set wlan.adapter directly --
                 // the WLANBaseInterface.radio setter clears adapter as a side-effect).
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", ev.description, "\" (", ev.name, ")");
-                port_add(PortKind.wifi, tconcat("windows:wifi:", ev.name), ev.name, ev.name, ModuleName, ev.description);
 
-                auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
+                auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
                 radio.adapter = ev.name;
                 radio.comment = ev.description.make_string();
 
-                auto wlan = Collection!WindowsWlan().create(base);
+                auto wlan = Collection!WindowsWlan().create(base, ObjectFlags.dynamic);
                 wlan.radio = radio;
                 return;
             case removed:
+                port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
                 foreach (r; Collection!WindowsWifiRadio().values)
                 {
-                    if (r.adapter != ev.name)
+                    if (!(r.flags & ObjectFlags.dynamic) || r.adapter != ev.name)
                         continue;
                     writeInfo("Wifi adapter gone: ", r.adapter);
-                    port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
                     Array!WindowsWlan paired;
                     foreach (w; Collection!WindowsWlan().values)
-                        if (dyn_cast!WindowsWifiRadio(w.radio) is r)
+                        if ((w.flags & ObjectFlags.dynamic) && dyn_cast!WindowsWifiRadio(w.radio) is r)
                             paired ~= w;
-                    foreach (w; paired[])
-                        Collection!WindowsWlan().remove(w);
-                    Collection!WindowsWifiRadio().remove(r);
+                    foreach (BaseObject w; paired[])
+                        w.destroy();
+                    BaseObject radio = r;
+                    radio.destroy();
                     return;
                 }
                 return;
@@ -594,4 +600,105 @@ private WifiPhyMode to_phy_mode(DOT11_PHY_TYPE type) pure
         default:
             return WifiPhyMode.unknown;
     }
+}
+
+
+unittest
+{
+    import manager.base : ActiveObject, StateSignal, register_object_state_handler, unregister_object_state_handler;
+    import manager.saved_config : export_all;
+
+    struct Observe
+    {
+        CID radio, wlan;
+        bool radio_destroyed, wlan_destroyed;
+
+        void state(ActiveObject obj, StateSignal signal) nothrow @nogc
+        {
+            if (signal == StateSignal.destroyed)
+            {
+                radio_destroyed |= obj.id == radio;
+                wlan_destroyed |= obj.id == wlan;
+            }
+        }
+    }
+
+    CID discovered_radio, discovered_wlan;
+    {
+        create_application();
+        scope(exit) shutdown_application();
+        auto mod = get_module!WindowsWlanModule();
+        auto manual_radio = Collection!WindowsWifiRadio().create("test-configured-radio");
+        scope(exit) manual_radio.destroy();
+        auto manual_wlan = Collection!WindowsWlan().create("test-configured-wlan");
+        scope(exit) manual_wlan.destroy();
+        enum manual_adapter = "test-configured-wifi-adapter";
+        manual_radio.adapter = manual_adapter;
+        manual_wlan.radio = manual_radio;
+        AdapterEvent ev;
+        ev.name_buf[0 .. manual_adapter.length] = manual_adapter;
+        ev.name_len = manual_adapter.length;
+        mod.apply_event(ev);
+        size_t matches;
+        foreach (r; Collection!WindowsWifiRadio().values)
+            matches += r.adapter == manual_adapter;
+        assert(matches == 1);
+        ev.kind = AdapterEventKind.removed;
+        mod.apply_event(ev);
+        assert(get_item(manual_radio.id) is manual_radio);
+        assert(get_item(manual_wlan.id) is manual_wlan);
+
+        enum adapter = "test-discovered-wifi-adapter";
+        ev.kind = AdapterEventKind.added;
+        ev.name_buf[0 .. adapter.length] = adapter;
+        ev.name_len = adapter.length;
+        mod.apply_event(ev);
+        WindowsWifiRadio radio;
+        WindowsWlan wlan;
+        foreach (r; Collection!WindowsWifiRadio().values)
+            if (r.adapter == adapter)
+                radio = r;
+        foreach (w; Collection!WindowsWlan().values)
+            if (dyn_cast!WindowsWifiRadio(w.radio) is radio)
+                wlan = w;
+        assert(radio && wlan);
+        assert((radio.flags & ObjectFlags.dynamic) && (wlan.flags & ObjectFlags.dynamic));
+        assert(radio.name("test-discovered-radio-renamed") is null);
+        assert(wlan.name("test-discovered-wlan-renamed") is null);
+        discovered_radio = radio.id;
+        discovered_wlan = wlan.id;
+        mod.apply_event(ev);
+        matches = 0;
+        foreach (r; Collection!WindowsWifiRadio().values)
+            matches += r.adapter == adapter;
+        assert(matches == 1);
+
+        MutableString!0 text;
+        export_all(text);
+        assert(text[].contains("/interface/wifi/add name=test-configured-radio "));
+        assert(text[].contains("/interface/wlan/add name=test-configured-wlan "));
+        assert(!text[].contains("/add name=test-discovered-radio-renamed "));
+        assert(!text[].contains("/add name=test-discovered-wlan-renamed "));
+        Observe observe;
+        observe.radio = discovered_radio;
+        observe.wlan = discovered_wlan;
+        register_object_state_handler(&observe.state);
+        scope(exit) unregister_object_state_handler(&observe.state);
+        ev.kind = AdapterEventKind.removed;
+        mod.apply_event(ev);
+        assert(observe.radio_destroyed && observe.wlan_destroyed);
+        assert(get_item(discovered_radio) is null && get_item(discovered_wlan) is null);
+        ev.kind = AdapterEventKind.added;
+        mod.apply_event(ev);
+        foreach (r; Collection!WindowsWifiRadio().values)
+            if (r.adapter == adapter)
+                radio = r;
+        foreach (w; Collection!WindowsWlan().values)
+            if (dyn_cast!WindowsWifiRadio(w.radio) is radio)
+                wlan = w;
+        discovered_radio = radio.id;
+        discovered_wlan = wlan.id;
+    }
+    assert(get_item(discovered_radio) is null);
+    assert(get_item(discovered_wlan) is null);
 }

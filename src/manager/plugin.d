@@ -56,6 +56,13 @@ protected:
     }
 }
 
+template module_slot(Mod)
+    if (is(Mod : Module))
+{
+    __gshared ushort module_slot;
+}
+
+
 // helper template to register a plugin
 mixin template DeclareModule(string name)
 {
@@ -282,13 +289,14 @@ void register_modules(Application app)
 
 private:
 
+pragma(inline, true)
 void register_module(alias mod)(Application app)
 {
     alias AllModules = Modules!mod;
     static if (AllModules.length == 0)
         pragma(msg, "Warning: No `Module`s declared in ", mod.stringof);
     else static foreach (m; AllModules)
-        app.register_module(alloc!m(app));
+        app.register_module(alloc!m(app), module_slot!m);
 }
 
 import urt.meta : AliasSeq;
