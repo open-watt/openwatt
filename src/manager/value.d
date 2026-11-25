@@ -533,8 +533,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     static if (is(typeof(Type.type_name)))
     {
         BaseObject item;
-        const(char)[] error = resolve_collection_item(v.asString, collection_type_info!Type(),
-            collection_type_info!(CollectionRoot!Type)(), item);
+        const(char)[] error = resolve_collection_item(v.asString, collection_type_info!Type(), collection_type_info!(CollectionRoot!Type)(), item);
         r = cast(Type)cast(void*)item;
         return error;
     }
@@ -564,8 +563,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     }
 }
 
-private const(char)[] resolve_collection_item(const(char)[] name, const(CollectionTypeInfo)* expected,
-    const(CollectionTypeInfo)* root, out BaseObject item)
+private const(char)[] resolve_collection_item(const(char)[] name, const(CollectionTypeInfo)* expected, const(CollectionTypeInfo)* root, out BaseObject item)
 {
     const(char)[] tail = name;
     const(char)[] type = tail.split!':';
