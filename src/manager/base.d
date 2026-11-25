@@ -674,13 +674,18 @@ protected:
     pragma(inline, true)
     void mark_set(T, string[] props)() nothrow @nogc
     {
-        enum mask = prop_mask!(T, props);
-        _props_set |= mask;
-        _mark_dirty(mask);
+        mark_set(prop_mask!(T, props));
     }
     void mark_set(T, string prop)() nothrow @nogc
     {
         return mark_set!(T, [ prop ])();
+    }
+
+    pragma(inline, false)
+    private final void mark_set(ulong mask)
+    {
+        _props_set |= mask;
+        _mark_dirty(mask);
     }
 
     pragma(inline, true)

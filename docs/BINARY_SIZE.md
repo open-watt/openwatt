@@ -98,6 +98,15 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-05 | ow/zigbee-attach-assert | ldc 1.43.0 | 5,835,512 | 534,920 | | master 868ba79b9 (#870) with the coordinator dropping its node ID on shutdown; deployed to the Pi (slot 213), five restarts without the attach_node assert |
 | 2026-11-06 | ow/zbdongle-no-flow | ldc 1.43.0 | 5,831,112 | 534,920 | | urt #396 (DTR asserted with flow control `none`) on master b623e6fda; deployed to the Pi (slot 218) with the ZBDongle-E on `flow-control=none`, four restarts with no ASH error |
 
+### ESP32-S3 reference devkit, `make esp-idf-build PLATFORM=esp32-s3 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | c5c2e70b | ldc 1.42.0 | 2,990,848 | 138,507 | 4,194,304 | ESP-IDF v6.1, Windows-mounted source tree |
+| 2026-11-25 | c5c2e70b | ldc 1.42.0 | 2,990,848 | 138,523 | 4,194,304 | ESP-IDF v6.1, matched compiler input order for the following rows |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 2,979,616 | 138,523 | 4,194,304 | shared collection cursor and reference lookup |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 2,954,736 | 138,523 | 4,194,304 | also share property marking |
+
 ### Waveshare ESP32-S3-RS485-CAN, `make esp-idf-build BOARD=waveshare-esp32-s3-rs485-can CONFIG=release`
 
 Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
@@ -168,6 +177,10 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | 2026-09-09 | a8c75cbf | ldc 1.42.0 | 1,612,576 | 91,223 | 1,769,472 | first row; 91% of the stock partition |
 | 2026-09-20 | #720 | ldc 1.42.0 | 1,671,152 | 96,793 | 1,769,472 | first build against ESP-IDF v6.2 (master); 94% of the stock partition |
 | 2026-09-23 | #747 | ldc 1.42.0 | 1,676,544 | 96,376 | 1,769,472 | app rollback enabled for the boot guard's firmware trial; 95% of the stock partition |
+| 2026-11-25 | c5c2e70b | ldc 1.42.0 | 1,740,160 | 98,296 | 1,769,472 | ESP-IDF v6.1, Windows-mounted source tree |
+| 2026-11-25 | c5c2e70b | ldc 1.42.0 | 1,740,112 | 98,312 | 1,769,472 | ESP-IDF v6.1, matched compiler input order for the following rows |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 1,736,352 | 98,312 | 1,769,472 | shared collection cursor and reference lookup |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 1,724,368 | 98,312 | 1,769,472 | also share property marking, 45,104 bytes free |
 
 ### Wireless-Tag WT99P4C5-S1, `make esp-idf-build BOARD=wt99p4c5-s1 CONFIG=release`
 
@@ -221,7 +234,14 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-24 | 0f8bd52d | ldc 1.43.0 | 1,601,796 | 46,428 | 4,194,304 | #983 runtime-owned process pool, urt c127e542; +80 B, RAM flat |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 source with size-fix probes, not its pinned runtime; startup-only, forwarding and final shared-iterator probes all image-neutral; final sections match 79b58c6d; BUILD_ID=unknown |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | merged #418 pin, same tree as measured 5218fe63; size-neutral vs 79b58c6d |
-
+| 2026-11-25 | c5c2e70b | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | Windows-mounted source tree |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,593,684 | 46,428 | 4,194,304 | shared cursor and reference lookup, Windows-mounted source tree |
+| 2026-11-25 | c5c2e70b | ldc 1.43.0 | 1,601,780 | 46,440 | 4,194,304 | matched compiler input order for the following rows |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,599,060 | 46,440 | 4,194,304 | shared collection cursor |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,593,764 | 46,440 | 4,194,304 | also share reference lookup |
+| 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,540,724 | 46,440 | 4,194,304 | also share property marking |
+| 2026-11-25 | 1102ee0f | ldc 1.43.0 | 1,540,788 | 46,448 | 4,194,304 | matched control for the boxed Variant lookup |
+| 2026-11-25 | #990 / urt a448e54 | ldc 1.43.0 | 1,535,444 | 46,448 | 4,194,304 | shared boxed Variant lookup saves 5,344 bytes |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

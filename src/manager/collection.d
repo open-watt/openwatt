@@ -328,55 +328,18 @@ nothrow @nogc:
 
     auto keys()
     {
-        struct Range
+        static struct Range
         {
         nothrow @nogc:
-            CollectionTable* table;
-            const(CollectionTypeInfo)* filter;
-            uint slot;
-            bool empty() const pure => slot > table.slot_count;
-            String front() => table.name_at(slot);
-            void popFront() { ++slot; advance(); }
-            private void advance()
-            {
-                for (; slot <= table.slot_count; ++slot)
-                {
-                    BaseObject o = table.at(slot);
-                    if (o !is null && type_matches(filter, o._typeInfo))
-                        return;
-                }
-            }
+            CollectionCursor cursor;
+            alias cursor this;
+            String front() => cursor.table.name_at(cursor.slot);
         }
-        auto r = Range(&table(), type_info, 1);
-        r.advance();
-        return r;
+        return Range(values());
     }
 
     auto values()
-    {
-        struct Range
-        {
-        nothrow @nogc:
-            CollectionTable* table;
-            const(CollectionTypeInfo)* filter;
-            uint slot;
-            bool empty() const pure => slot > table.slot_count;
-            BaseObject front() pure => table.at(slot);
-            void popFront() { ++slot; advance(); }
-            private void advance()
-            {
-                for (; slot <= table.slot_count; ++slot)
-                {
-                    BaseObject o = table.at(slot);
-                    if (o !is null && type_matches(filter, o._typeInfo))
-                        return;
-                }
-            }
-        }
-        auto r = Range(&table(), type_info, 1);
-        r.advance();
-        return r;
-    }
+        => CollectionCursor(table(), type_info);
 
     const(char)[] generate_name(const(char)[] prefix)
     {
@@ -394,6 +357,34 @@ nothrow @nogc:
                 return name;
         }
         return null;
+    }
+}
+
+private struct CollectionCursor
+{
+nothrow @nogc:
+    CollectionTable* table;
+    const(CollectionTypeInfo)* filter;
+    uint slot;
+
+    this(ref CollectionTable table, const(CollectionTypeInfo)* filter)
+    {
+        this.table = &table;
+        this.filter = filter;
+        popFront();
+    }
+
+    bool empty() const pure => slot > table.slot_count;
+    BaseObject front() pure => table.at(slot);
+
+    void popFront()
+    {
+        while (++slot <= table.slot_count)
+        {
+            BaseObject obj = table.at(slot);
+            if (obj !is null && type_matches(filter, obj._typeInfo))
+                break;
+        }
     }
 }
 
@@ -425,39 +416,14 @@ nothrow @nogc:
     // iterate live objects of Type and all derived types
     auto values()
     {
-        struct Range
+        static struct Range
         {
         nothrow @nogc:
-            CollectionTable* table;
-            const(CollectionTypeInfo)* filter;
-            uint slot;
-
-            bool empty() const pure
-                => slot > table.slot_count;
-
-            Type front() pure
-                => cast(Type)cast(void*)table.at(slot);
-
-            void popFront()
-            {
-                ++slot;
-                advance();
-            }
-
-            void advance()
-            {
-                for (; slot <= table.slot_count; ++slot)
-                {
-                    BaseObject o = table.at(slot);
-                    if (o !is null && type_matches(filter, o._typeInfo))
-                        return;
-                }
-            }
+            CollectionCursor cursor;
+            alias cursor this;
+            Type front() pure => cast(Type)cast(void*)cursor.front();
         }
-
-        auto r = Range(&_base.table(), _base.type_info, 1);
-        r.advance();
-        return r;
+        return Range(_base.values());
     }
 
     static if (is(Type : ActiveObject) && is(typeof((Type t) => t.heartbeat(MonoTime.init))))
