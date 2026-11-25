@@ -1921,6 +1921,38 @@ unittest
     }
     assert(capture.reports == 0, "the log sink must not log its own losses");
     assert(link.mtu(200) is null);
+
+    struct Reenter
+    {
+        SyncEncoder enc;
+        SyncPeer peer;
+        void outgoing(const(Packet)*, BaseInterface, PacketDirection, void*) nothrow @nogc
+        {
+            if (SyncEncoder e = enc)
+            {
+                enc = null;
+                e.encode_error(peer, 22, "inner");
+            }
+        }
+    }
+    PacketFilter outgoing = PacketFilter(PacketType.raw, PacketDirection.outgoing);
+    foreach (kind; [SyncEncoderKind.binary, SyncEncoderKind.json])
+    {
+        peer._encoder = kind;
+        SyncEncoder enc = kind == SyncEncoderKind.binary ? alloc!BinaryEncoder(null) : alloc!JsonEncoder(null);
+        scope(exit) free(enc);
+        enc.encode_error(peer, 11, "outer");
+        assert(link.frames.length == 1);
+        Array!ubyte outer = link.frames[0].move;
+        link.frames.clear();
+        Reenter reenter = Reenter(enc, peer);
+        link.subscribe(&reenter.outgoing, outgoing);
+        enc.encode_error(peer, 11, "outer");
+        link.unsubscribe(&reenter.outgoing);
+        assert(link.frames.length == 2 && link.frames[0][] != outer[]);
+        assert(link.frames[1][] == outer[], "an encode nested in the outgoing path must not overwrite the frame being sent");
+        link.frames.clear();
+    }
     peer._encoder = SyncEncoderKind.binary;
 
     ubyte[1000] message;

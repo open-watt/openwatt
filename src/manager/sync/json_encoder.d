@@ -11,6 +11,7 @@ module manager.sync.json_encoder;
 
 import urt.array;
 import urt.format.json;
+import urt.lifetime : move;
 import urt.log;
 import urt.mem;
 import urt.meta.enuminfo : enum_key_from_value, enum_from_key, VoidEnumInfo;
@@ -1328,15 +1329,16 @@ private:
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control, bool bundled = false)
     {
         _buf ~= '}';
-        const(ubyte)[] frame = cast(const(ubyte)[])_buf[];
+        Array!char frame = _buf.move;
+        scope(exit) frame.move(_buf);
         immutable bool direct = queue == TxQueue.control && !bundled;
-        int r = direct ? peer.transmit_frame(frame, true, queue) : peer.bundle(frame, queue);
+        int r = direct ? peer.transmit_frame(cast(const(ubyte)[])frame[], true, queue) : peer.bundle(cast(const(ubyte)[])frame[], queue);
         if (r < 0 && direct)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
             // a drop here means the peer permanently misses this event; a refused bundle stays with its producer.
-            const preview = _buf.length < 200 ? _buf.length : 200;
-            log.warning("dropped frame to peer (", _buf.length, "B): ", cast(const(char)[])_buf[0 .. preview], _buf.length > 200 ? "..." : "");
+            const preview = frame.length < 200 ? frame.length : 200;
+            log.warning("dropped frame to peer (", frame.length, "B): ", frame[0 .. preview], frame.length > 200 ? "..." : "");
         }
         return r;
     }

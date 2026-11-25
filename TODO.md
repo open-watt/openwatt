@@ -1174,6 +1174,17 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **Buffers lent to a re-entrant send**: `forward()` runs outgoing subscribers while the packet still
+  borrows the sender's slice, so a subscriber that sends again through the same object rewrites the
+  bytes of the frame in flight. Exposed: `SyncPeer._bundle` (a nested `bundle()` re-enters
+  `flush_bundle()`, sends the bundle twice, then clears and refills it under the outer packet, and the
+  outer flush's `_bundle.clear()` then drops the nested message);
+  `SyncPeer._frag_tx` through a nested `restart()`; `BLEClient._user_ops[0].buf`, which a nested
+  `submit_op` can reallocate or `complete_op` can shift; MQTT retained payloads replayed to a callback
+  that republishes the topic. Receive-side buffers reused across a handler are lower risk: tesla
+  `VehicleSession._rx_frame`, `WebSocket._message`, Windows `TLSStream._receive_buffer`, ASHv2
+  `_rx_buffer`, ISO-TP reassembly buffers.
+
 - **RDP allocation-failure coverage**: session, frame and held-frame allocations fail soft (a send is
   refused, a frame cut retries on the session timer, an early frame is dropped for retransmission), but no test injects a
   failure; add it once the fixture can fail an allocation on demand.

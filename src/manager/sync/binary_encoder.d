@@ -10,6 +10,7 @@ module manager.sync.binary_encoder;
 
 import urt.array;
 import urt.endian : littleEndianToNative, nativeToLittleEndian;
+import urt.lifetime : move;
 import urt.log;
 import urt.mem;
 import urt.meta.enuminfo : VoidEnumInfo;
@@ -1117,13 +1118,15 @@ private:
 
     int send_frame(SyncPeer peer, TxQueue queue = TxQueue.control, bool bundled = false)
     {
+        Array!ubyte frame = _buf.move;
+        scope(exit) frame.move(_buf);
         immutable bool direct = queue == TxQueue.control && !bundled;
-        int r = direct ? peer.transmit_frame(_buf[], false, queue) : peer.bundle(_buf[], queue);
+        int r = direct ? peer.transmit_frame(frame[], false, queue) : peer.bundle(frame[], queue);
         if (r < 0 && direct)
         {
             // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
             // a drop here means the peer permanently misses this event; a refused bundle stays with its producer.
-            log.warning("dropped frame to peer (", _buf.length, "B): verb=", enum_key_name!Verb(cast(Verb)_buf[0]));
+            log.warning("dropped frame to peer (", frame.length, "B): verb=", enum_key_name!Verb(cast(Verb)frame[0]));
         }
         return r;
     }
