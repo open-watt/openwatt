@@ -4,15 +4,19 @@ import manager.features;
 
 nothrow:
 
+version (unittest) enum has_application_shutdown = true;
+else version (Embedded) enum has_application_shutdown = false;
+else enum has_application_shutdown = true;
+
 enum ModulePhase : ubyte
 {
     pre_init,
     init,
     post_init,
-    deinit,
     pre_update,
     update,
     post_update,
+    deinit,
 }
 
 alias ModuleHook = void function() nothrow @nogc;
@@ -21,7 +25,7 @@ struct ModuleRegistration
 {
     string name;
     void* state;
-    ModuleHook[ModulePhase.max + 1] hooks;
+    ModuleHook[has_application_shutdown ? ModulePhase.max + 1 : ModulePhase.deinit] hooks;
 
     void run(ModulePhase phase) const nothrow @nogc
     {
@@ -309,7 +313,8 @@ ModuleRegistration describe_static_module(T)()
 
     static foreach (phase; __traits(allMembers, ModulePhase))
     {{
-        static if (__traits(hasMember, T, phase) && __traits(compiles, &__traits(getMember, T, phase)))
+        static if ((has_application_shutdown || phase != "deinit") &&
+                   __traits(hasMember, T, phase) && __traits(compiles, &__traits(getMember, T, phase)))
         {
             alias hook = __traits(getMember, T, phase);
             static assert(__traits(isStaticFunction, hook) != stateful,

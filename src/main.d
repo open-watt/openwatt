@@ -14,6 +14,7 @@ import manager.bootguard;
 import manager.collection;
 import manager.console.session : Session, default_console_session_name;
 import manager.panel : Gesture, Indication, end_indication, indicate;
+import manager.plugin : has_application_shutdown;
 import manager.log : default_log_sink_name, format_log_text,
                      retire_bootstrap_log_sink, set_bootstrap_log_sink;
 import manager.saved_config : saved_config_file, valid_saved_config;
@@ -344,7 +345,8 @@ int main(string[] args)
 
     watchdog_stop();
 
-    shutdown_application();
+    static if (has_application_shutdown)
+        shutdown_application();
 
     if (reboot_pending())
     {

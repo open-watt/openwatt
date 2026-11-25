@@ -315,6 +315,7 @@ void ring(ubyte doorbell)
 bool ring_from_isr(ubyte doorbell)
     => g_doorbells.ring(doorbell) && g_app && g_app._wake_event.set_from_isr();
 
+static if (has_application_shutdown)
 void shutdown_application()
 {
     run_module_phase(ModulePhase.deinit);
