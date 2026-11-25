@@ -22,7 +22,7 @@ static if (has_tls)
     mixin DeclareStaticModule!"tls";
     nothrow @nogc:
 
-        static void init(void*)
+        static void init()
         {
             g_app.register_enum!CertType();
             g_app.register_enum!CertStatus();
@@ -32,7 +32,7 @@ static if (has_tls)
             g_app.console.register_collection!TLSServer();
         }
 
-        static void update(void*)
+        static void update()
         {
             Collection!Certificate().update_all();
             Collection!TLSServer().update_all();

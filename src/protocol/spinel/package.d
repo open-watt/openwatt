@@ -18,12 +18,12 @@ struct SpinelProtocolModule
     mixin DeclareStaticModule!"protocol.spinel";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!SpinelClient();
     }
 
-    static void update(void*)
+    static void update()
     {
         Collection!SpinelClient().update_all();
     }

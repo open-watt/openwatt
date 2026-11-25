@@ -65,7 +65,7 @@ enum ModulePhase : ubyte
     update,
     post_update,
 }
-alias ModuleHook = void function(void*) nothrow @nogc;
+alias ModuleHook = void function() nothrow @nogc;
 
 struct ModuleRegistration
 {
@@ -77,7 +77,20 @@ struct ModuleRegistration
     void run(ModulePhase phase) const nothrow @nogc
     {
         if (auto hook = hooks[phase])
-            hook(cast(void*)state);
+            invoke(hook);
+    }
+
+    void invoke(ModuleHook hook) const nothrow @nogc
+    {
+        if (state)
+        {
+            void delegate() nothrow @nogc dg;
+            dg.ptr = cast(void*)state;
+            dg.funcptr = hook;
+            dg();
+        }
+        else
+            hook();
     }
 }
 
@@ -89,7 +102,17 @@ mixin template DeclareStaticModule(string name)
 
 template legacy_instance(T)
 {
-    __gshared Module legacy_instance;
+    __gshared LegacyModuleState legacy_instance;
+}
+
+struct LegacyModuleState
+{
+    Module instance;
+
+    void invoke(string phase)() nothrow @nogc
+    {
+        __traits(getMember, instance, phase)();
+    }
 }
 
 // helper template to register a plugin
@@ -108,6 +131,12 @@ mixin template DeclareModule(string name)
 
 
 __gshared const(ModuleRegistration[]) registrations = collect_modules();
+
+void run_module_phase(ModulePhase phase, scope const(ModuleRegistration)[] modules = registrations) nothrow @nogc
+{
+    foreach (ref entry; modules)
+        entry.run(phase);
+}
 
 static assert(module_names_unique(registrations), "Duplicate module name");
 
@@ -355,13 +384,24 @@ ModuleRegistration describe_static_module(T)()
 {
     ModuleRegistration result;
     result.name = T.ModuleName;
-    static if (__traits(hasMember, T, "module_state"))
-        result.state = cast(void*)&T.module_state;
-    static foreach (phase; __traits(allMembers, ModulePhase))
+    enum stateful = __traits(hasMember, T, "module_state");
+    static if (stateful)
     {
-        static if (__traits(hasMember, T, phase))
-            result.hooks[__traits(getMember, ModulePhase, phase)] = &__traits(getMember, T, phase);
+        static assert(is(typeof(T.module_state) == T));
+        static assert(__traits(isZeroInit, T));
+        result.state = cast(void*)&T.module_state;
     }
+
+    static foreach (phase; __traits(allMembers, ModulePhase))
+    {{
+        static if (__traits(hasMember, T, phase))
+        {
+            alias hook = __traits(getMember, T, phase);
+            static assert(__traits(isStaticFunction, hook) != stateful,
+                T.stringof ~ "." ~ phase ~ " must match the module's state");
+            result.hooks[__traits(getMember, ModulePhase, phase)] = &hook;
+        }
+    }}
     return result;
 }
 
@@ -374,17 +414,44 @@ ModuleRegistration describe_legacy_module(T)()
     static foreach (phase; __traits(allMembers, ModulePhase))
     {
         static if (__traits(hasMember, T, phase) && !is(__traits(parent, __traits(getMember, T, phase)) == Module))
-            result.hooks[__traits(getMember, ModulePhase, phase)] = &legacy_hook!phase;
+            result.hooks[__traits(getMember, ModulePhase, phase)] = &LegacyModuleState.invoke!phase;
     }
     return result;
 }
 
 void construct_module(T)(Application app) @nogc
 {
-    legacy_instance!T = alloc!T(app);
+    legacy_instance!T.instance = alloc!T(app);
 }
 
-void legacy_hook(string phase)(void* context) @nogc
+
+unittest
 {
-    __traits(getMember, *cast(Module*)context, phase)();
+    static struct Stateful
+    {
+    nothrow @nogc:
+        int count;
+        void update() { ++count; }
+    }
+
+    static struct Stateless
+    {
+    nothrow @nogc:
+        static __gshared int count;
+        static void update() { ++count; }
+    }
+
+    Stateful state;
+    ModuleRegistration entry;
+    entry.state = &state;
+    entry.hooks[ModulePhase.update] = &Stateful.update;
+    entry.run(ModulePhase.pre_init);
+    assert(state.count == 0);
+    entry.run(ModulePhase.update);
+    assert(state.count == 1);
+
+    entry.state = null;
+    entry.hooks[ModulePhase.update] = &Stateless.update;
+    entry.run(ModulePhase.update);
+    assert(Stateless.count == 1);
 }

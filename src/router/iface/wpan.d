@@ -373,7 +373,7 @@ struct WpanInterfaceModule
     mixin DeclareStaticModule!"interface.wpan";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         register_packet_codec!WpanFrame();
     }

@@ -1127,7 +1127,7 @@ struct BuiltinWifiModule
     mixin DeclareStaticModule!"interface.wifi.builtin";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!BuiltinWiFi();
         g_app.console.register_collection!BuiltinWlan();

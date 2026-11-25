@@ -20,13 +20,13 @@ struct ESPHomeModule
     mixin DeclareStaticModule!"protocol.esphome";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!ESPHomeClient();
         g_app.console.register_collection!ESPHomeBinding();
     }
 
-    static void update(void*)
+    static void update()
     {
         Collection!ESPHomeClient().update_all();
     }

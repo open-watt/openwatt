@@ -292,7 +292,7 @@ struct MemoryStreamModule
     mixin DeclareStaticModule!"stream.memory";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!MemoryMode();
         g_app.console.register_collection!MemoryStream();

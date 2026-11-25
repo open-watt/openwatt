@@ -161,7 +161,7 @@ struct USBSerialStreamModule
     mixin DeclareStaticModule!"stream.usb-serial";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!USBSerialStream();
     }

@@ -698,7 +698,7 @@ struct WiFiInterfaceModule
     mixin DeclareStaticModule!"interface.wifi";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         register_packet_codec!Wifi80211();
 

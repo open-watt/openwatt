@@ -317,8 +317,7 @@ bool ring_from_isr(ubyte doorbell)
 
 void shutdown_application()
 {
-    foreach (ref m; registrations)
-        m.run(ModulePhase.deinit);
+    run_module_phase(ModulePhase.deinit);
 
     free(g_app);
 
@@ -334,7 +333,7 @@ void shutdown_application()
 Mod get_module(Mod)()
     if (is(Mod : Module))
 {
-    return cast(Mod)cast(void*)legacy_instance!Mod;
+    return cast(Mod)cast(void*)legacy_instance!Mod.instance;
 }
 
 
@@ -520,14 +519,11 @@ nothrow @nogc:
             if (m.construct)
                 m.construct(this);
 
-        foreach (ref m; registrations)
-            m.run(ModulePhase.pre_init);
+        run_module_phase(ModulePhase.pre_init);
 
-        foreach (ref m; registrations)
-            m.run(ModulePhase.init);
+        run_module_phase(ModulePhase.init);
 
-        foreach (ref m; registrations)
-            m.run(ModulePhase.post_init);
+        run_module_phase(ModulePhase.post_init);
 
         console.freeze();
 
@@ -1075,7 +1071,7 @@ nothrow @nogc:
                 continue;
 
             MonoTime start = getTime();
-            hook(cast(void*)entry.state);
+            entry.invoke(hook);
             Duration elapsed = getTime() - start;
             if (elapsed > worst_duration)
             {

@@ -48,7 +48,7 @@ struct PPPModule
     mixin DeclareStaticModule!"protocol.ppp";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!TunnelProtocol();
 
@@ -58,7 +58,7 @@ nothrow @nogc:
         g_app.console.register_collection!PPPoEServer();
     }
 
-    static void update(void*)
+    static void update()
     {
         Collection!PPPServer().update_all();
         Collection!PPPoEServer().update_all();

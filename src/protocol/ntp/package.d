@@ -15,12 +15,12 @@ struct NTPModule
     mixin DeclareStaticModule!"protocol.ntp";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!NTPClient();
     }
 
-    static void update(void*)
+    static void update()
     {
         Collection!NTPClient().update_all();
     }

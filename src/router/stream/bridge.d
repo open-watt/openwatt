@@ -165,7 +165,7 @@ struct BridgeStreamModule
     mixin DeclareStaticModule!"stream.bridge";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!BridgeStream();
     }

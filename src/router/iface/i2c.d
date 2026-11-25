@@ -429,7 +429,7 @@ struct I2CModule
     mixin DeclareStaticModule!"router.iface.i2c";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         register_packet_codec!I2CFrame();
         g_app.register_enum!I2CFrameType();

@@ -20,7 +20,7 @@ struct DHCPModule
     mixin DeclareStaticModule!"protocol.dhcp";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!DHCPOptionType();
 
@@ -36,7 +36,7 @@ nothrow @nogc:
         }
     }
 
-    static void update(void*)
+    static void update()
     {
         Collection!DHCPClient().update_all();
         version (UseInternalIPStack)

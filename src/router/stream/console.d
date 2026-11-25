@@ -368,7 +368,7 @@ struct ConsoleStreamModule
     mixin DeclareStaticModule!"stream.console";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!ConsoleInput();
         g_app.register_enum!ConsoleOutput();

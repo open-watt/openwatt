@@ -79,17 +79,16 @@ nothrow @nogc:
 
     static __gshared PortModule module_state;
 
-    static void init(void*)
+    void init()
     {
         g_app.register_enum!PortKind();
         g_app.console.register_command!(port_print_command, "print")("/port", null);
     }
 
-    static void deinit(void* state)
+    void deinit()
     {
-        auto ports = cast(PortModule*)state;
-        ports._ports.clear();
-        ports._generation = 0;
+        _ports.clear();
+        _generation = 0;
     }
 
     const(PortInfo)[] ports() const pure

@@ -202,7 +202,7 @@ struct FileStreamModule
     mixin DeclareStaticModule!"stream.file";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!FileMode();
         g_app.console.register_collection!FileStream();

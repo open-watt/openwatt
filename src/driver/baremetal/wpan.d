@@ -302,7 +302,7 @@ struct BuiltinWpanModule
     mixin DeclareStaticModule!"interface.wpan.builtin";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!BuiltinWpan();
         BuiltinWpan._service_doorbell = register_doorbell(&BuiltinWpan.service_radios, EventPriority.bulk);

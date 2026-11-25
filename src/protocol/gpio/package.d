@@ -928,7 +928,7 @@ struct GpioModule
     mixin DeclareStaticModule!"protocol.gpio";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.register_enum!Pull();
         g_app.register_enum!GpioKind();

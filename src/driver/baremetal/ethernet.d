@@ -446,7 +446,7 @@ struct BuiltinEthernetModule
     mixin DeclareStaticModule!"interface.ethernet.builtin";
 nothrow @nogc:
 
-    static void init(void*)
+    static void init()
     {
         g_app.console.register_collection!BuiltinEthernet();
         _service = register_doorbell(&service, EventPriority.bulk);
