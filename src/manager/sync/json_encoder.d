@@ -133,51 +133,32 @@ nothrow @nogc:
         if (!p.get)
             return;
 
-        begin_frame("set");
-        _buf.append(",\"target\":", peer.handle_of(obj));
-        _buf.append(",\"prop\":");
-        write_str(p.name[]);
+        begin_property_frame(peer, "set", obj.id, p.name[]);
         _buf.append(",\"value\":");
         Variant v = p.get(obj, *p);
         write_variant(v);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq)
     {
-        begin_frame("set");
-        _buf.append(",\"target\":", peer.handle_of(target));
-        _buf.append(",\"prop\":");
-        write_str(prop_name);
+        begin_property_frame(peer, "set", target, prop_name);
         _buf.append(",\"value\":");
         write_variant(value);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_reset(SyncPeer peer, CID target, const(char)[] prop_name, uint seq)
     {
-        begin_frame("reset");
-        _buf.append(",\"target\":", peer.handle_of(target));
-        _buf.append(",\"prop\":");
-        write_str(prop_name);
-        if (seq)
-            _buf.append(",\"seq\":", seq);
-        send_frame(peer);
+        begin_property_frame(peer, "reset", target, prop_name);
+        finish_property_frame(peer, seq);
     }
 
     // Outbound: commands, errors, enums, subscriptions
 
     override void encode_cmd(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("cmd");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "cmd", seq, text);
     }
 
     override int encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text)
@@ -196,20 +177,12 @@ nothrow @nogc:
 
     override void encode_error(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("error");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "error", seq, text);
     }
 
     override void encode_suggest(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame("suggest");
-        _buf.append(",\"seq\":", seq);
-        _buf.append(",\"text\":");
-        write_str(text);
-        send_frame(peer);
+        encode_text_command(peer, "suggest", seq, text);
     }
 
     override void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed)
@@ -622,93 +595,9 @@ nothrow @nogc:
             return;
         }
 
-        // a required field absent or mistyped drops the whole frame; optional fields default only when absent
-        bool bad_frame;
-        void bad(const(char)[] name)
-        {
-            if (!bad_frame)
-                log.warning("bad or missing field '", name, "'");
-            bad_frame = true;
-        }
-        uint require_uint(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (m && m.isUint)
-                return m.asUint();
-            bad(name);
-            return 0;
-        }
-        uint optional_uint(ref Variant obj, const(char)[] name, uint def = 0)
-        {
-            Variant* m = obj.getMember(name);
-            if (!m)
-                return def;
-            if (m.isUint)
-                return m.asUint();
-            bad(name);
-            return def;
-        }
-        ulong require_ulong(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (m && m.isUlong)
-                return m.asUlong();
-            bad(name);
-            return 0;
-        }
-        ulong optional_ulong(ref Variant obj, const(char)[] name, ulong def = 0)
-        {
-            Variant* m = obj.getMember(name);
-            if (!m)
-                return def;
-            if (m.isUlong)
-                return m.asUlong();
-            bad(name);
-            return def;
-        }
-        long require_long(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (m && m.isLong)
-                return m.asLong();
-            bad(name);
-            return 0;
-        }
-        const(char)[] require_str(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (m && m.isString)
-                return m.asString();
-            bad(name);
-            return null;
-        }
-        const(char)[] optional_str(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (!m || m.isNull)
-                return null;
-            if (m.isString)
-                return m.asString();
-            bad(name);
-            return null;
-        }
-        bool optional_bool(ref Variant obj, const(char)[] name)
-        {
-            Variant* m = obj.getMember(name);
-            if (!m)
-                return false;
-            if (m.isBool)
-                return m.isTrue;
-            bad(name);
-            return false;
-        }
-        SyncHandle require_handle(ref Variant obj, const(char)[] name)
-            => cast(SyncHandle)require_ulong(obj, name);
-        SyncHandle optional_handle(ref Variant obj, const(char)[] name)
-            => cast(SyncHandle)optional_ulong(obj, name, SyncPeer.invalid_handle);
-
-        const(char)[] kind_str = require_str(json, "kind");
-        if (bad_frame || kind_str.length == 0)
+        JsonFrameReader reader = JsonFrameReader(&json);
+        const(char)[] kind_str = reader.require_str("kind");
+        if (reader.failed || kind_str.length == 0)
         {
             log.warning("frame missing 'kind' field");
             return;
@@ -718,23 +607,23 @@ nothrow @nogc:
         {
             case "add_name":
             {
-                SyncHandle h = require_handle(json, "h");
-                const(char)[] name = require_str(json, "name");
-                const(char)[] type = require_str(json, "type");
-                if (!bad_frame)
+                SyncHandle h = reader.require_handle("h");
+                const(char)[] name = reader.require_str("name");
+                const(char)[] type = reader.require_str("type");
+                if (!reader.failed)
                     sync.inbound_add_name(peer, h, name, type);
                 break;
             }
 
             case "bind":
             {
-                CID target = peer.cid_of(require_handle(json, "target"));
-                const(char)[] type = require_str(json, "type");
-                uint seq = optional_uint(json, "seq");
+                CID target = peer.cid_of(reader.require_handle("target"));
+                const(char)[] type = reader.require_str("type");
+                uint seq = reader.optional_uint("seq");
                 Variant* pv = json.getMember("props");
                 if (pv && !pv.isObject)
-                    bad("props");
-                if (bad_frame)
+                    reader.bad("props");
+                if (reader.failed)
                     break;
                 sync.inbound_bind(peer, target, type, seq);
                 dispatch_props(peer, target, json);
@@ -743,54 +632,54 @@ nothrow @nogc:
 
             case "unbind":
             {
-                CID target = peer.cid_of(require_handle(json, "target"));
-                uint seq = optional_uint(json, "seq");
-                if (!bad_frame)
+                CID target = peer.cid_of(reader.require_handle("target"));
+                uint seq = reader.optional_uint("seq");
+                if (!reader.failed)
                     sync.inbound_unbind(peer, target, seq);
                 break;
             }
 
             case "create":
             {
-                const(char)[] type = require_str(json, "type");
-                uint seq = optional_uint(json, "seq");
+                const(char)[] type = reader.require_str("type");
+                uint seq = reader.optional_uint("seq");
 
                 Array!NamedArgument props;
                 Variant* pv = json.getMember("props");
                 if (pv && !pv.isObject)
-                    bad("props");
+                    reader.bad("props");
                 else if (pv)
                 {
                     foreach (k, ref v; *pv)
                     {
                         if (k[] == "name" && !v.isString)
                         {
-                            bad("props");
+                            reader.bad("props");
                             break;
                         }
                         props ~= NamedArgument(k, v);
                     }
                 }
 
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_create(peer, type, props[], seq);
                 break;
             }
 
             case "destroy":
             {
-                CID target = peer.cid_of(require_handle(json, "target"));
-                uint seq = optional_uint(json, "seq");
-                if (!bad_frame)
+                CID target = peer.cid_of(reader.require_handle("target"));
+                uint seq = reader.optional_uint("seq");
+                if (!reader.failed)
                     sync.inbound_destroy(peer, target, seq);
                 break;
             }
 
             case "state":
             {
-                const(char)[] sig_str = require_str(json, "signal");
-                CID target = peer.cid_of(require_handle(json, "target"));
-                if (bad_frame)
+                const(char)[] sig_str = reader.require_str("signal");
+                CID target = peer.cid_of(reader.require_handle("target"));
+                if (reader.failed)
                     break;
                 const(StateSignal)* sig = enum_from_key!StateSignal(sig_str);
                 if (!sig || *sig > StateSignal.offline)
@@ -804,74 +693,74 @@ nothrow @nogc:
 
             case "set":
             {
-                uint seq = optional_uint(json, "seq");
+                uint seq = reader.optional_uint("seq");
                 Variant* val = json.getMember("value");
                 if (json.getMember("prop"))
                 {
                     // legacy object-mirror property set
-                    CID target = peer.cid_of(require_handle(json, "target"));
-                    const(char)[] prop = require_str(json, "prop");
+                    CID target = peer.cid_of(reader.require_handle("target"));
+                    const(char)[] prop = reader.require_str("prop");
                     if (!val)
-                        bad("value");
-                    if (!bad_frame)
+                        reader.bad("value");
+                    if (!reader.failed)
                         sync.inbound_set(peer, target, prop, *val, seq);
                     break;
                 }
-                SyncHandle h = optional_handle(json, "h");
-                const(char)[] path = optional_str(json, "path");
-                bool reset = optional_bool(json, "reset");
-                if (!bad_frame)
+                SyncHandle h = reader.optional_handle("h");
+                const(char)[] path = reader.optional_str("path");
+                bool reset = reader.optional_bool("reset");
+                if (!reader.failed)
                     sync.inbound_model_set(peer, seq, h, path, val, reset);
                 break;
             }
 
             case "reset":
             {
-                CID target = peer.cid_of(require_handle(json, "target"));
-                const(char)[] prop = require_str(json, "prop");
-                uint seq = optional_uint(json, "seq");
-                if (!bad_frame)
+                CID target = peer.cid_of(reader.require_handle("target"));
+                const(char)[] prop = reader.require_str("prop");
+                uint seq = reader.optional_uint("seq");
+                if (!reader.failed)
                     sync.inbound_reset(peer, target, prop, seq);
                 break;
             }
 
             case "cmd":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] text = require_str(json, "text");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                const(char)[] text = reader.require_str("text");
+                if (!reader.failed)
                     sync.inbound_cmd(peer, seq, text);
                 break;
             }
 
             case "result":
             {
-                uint seq = require_uint(json, "seq");
+                uint seq = reader.require_uint("seq");
                 Variant* val = json.getMember("value");
-                const(char)[] text = optional_str(json, "text");
+                const(char)[] text = reader.optional_str("text");
                 Variant empty;
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_result(peer, seq, val ? *val : empty, text);
                 break;
             }
 
             case "suggest":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] text = optional_str(json, "text");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                const(char)[] text = reader.optional_str("text");
+                if (!reader.failed)
                     sync.inbound_suggest(peer, seq, text);
                 break;
             }
 
             case "console":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] event_text = require_str(json, "event");
+                uint seq = reader.require_uint("seq");
+                const(char)[] event_text = reader.require_str("event");
                 const(SyncConsoleEvent)* event_value = enum_from_key!SyncConsoleEvent(event_text);
                 if (!event_value)
-                    bad("event");
-                if (bad_frame)
+                    reader.bad("event");
+                if (reader.failed)
                     break;
 
                 SyncConsoleEvent event = *event_value;
@@ -881,32 +770,32 @@ nothrow @nogc:
                 {
                     case SyncConsoleEvent.open:
                     case SyncConsoleEvent.terminal:
-                        uint width = require_uint(json, "width");
-                        uint height = require_uint(json, "height");
-                        uint features = require_uint(json, "features");
-                        const(char)[] terminal_type = optional_str(json, "terminal");
+                        uint width = reader.require_uint("width");
+                        uint height = reader.require_uint("height");
+                        uint features = reader.require_uint("features");
+                        const(char)[] terminal_type = reader.optional_str("terminal");
                         if (width > ushort.max || height > ushort.max || features > ushort.max)
-                            bad("terminal state");
+                            reader.bad("terminal state");
                         terminal = SyncConsoleTerminal(cast(ushort)width, cast(ushort)height, cast(ClientFeatures)features, terminal_type);
                         break;
                     case SyncConsoleEvent.input:
                     case SyncConsoleEvent.output:
-                        data = require_str(json, "data");
+                        data = reader.require_str("data");
                         break;
                     case SyncConsoleEvent.close:
                     case SyncConsoleEvent.closed:
                         break;
                 }
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_console(peer, seq, event, data, terminal);
                 break;
             }
 
             case "error":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] text = optional_str(json, "text");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                const(char)[] text = reader.optional_str("text");
+                if (!reader.failed)
                     sync.inbound_error(peer, seq, text);
                 break;
             }
@@ -918,7 +807,7 @@ nothrow @nogc:
                 {
                     if (!pats.isArray)
                     {
-                        bad("patterns");
+                        reader.bad("patterns");
                         break;
                     }
                     Array!(const(char)[]) patterns;
@@ -926,22 +815,22 @@ nothrow @nogc:
                     {
                         if (!(*pats)[i].isString)
                         {
-                            bad("patterns");
+                            reader.bad("patterns");
                             break;
                         }
                         patterns ~= (*pats)[i].asString();
                     }
-                    uint seq = require_uint(json, "seq");
-                    bool once = optional_bool(json, "once");
-                    ulong from = optional_ulong(json, "from");
-                    ulong to = optional_ulong(json, "to");
-                    uint points = optional_uint(json, "points");
-                    if (!bad_frame)
+                    uint seq = reader.require_uint("seq");
+                    bool once = reader.optional_bool("once");
+                    ulong from = reader.optional_ulong("from");
+                    ulong to = reader.optional_ulong("to");
+                    uint points = reader.optional_uint("points");
+                    if (!reader.failed)
                         sync.inbound_model_sub(peer, seq, patterns[], once, from, to, points);
                     break;
                 }
-                const(char)[] pattern = require_str(json, "pattern");
-                if (!bad_frame)
+                const(char)[] pattern = reader.require_str("pattern");
+                if (!reader.failed)
                     sync.inbound_sub(peer, pattern.make_string());
                 break;
             }
@@ -951,14 +840,14 @@ nothrow @nogc:
                 ubyte caps;
                 Variant* cv = json.getMember("caps");
                 if (cv && !cv.isArray)
-                    bad("caps");
+                    reader.bad("caps");
                 else if (cv)
                 {
                     for (size_t i = 0; i < cv.length(); ++i)
                     {
                         if (!(*cv)[i].isString)
                         {
-                            bad("caps");
+                            reader.bad("caps");
                             break;
                         }
                         const(SyncCaps)* c = enum_from_key!SyncCaps((*cv)[i].asString());
@@ -966,43 +855,43 @@ nothrow @nogc:
                             caps |= *c;
                     }
                 }
-                uint max_message = optional_uint(json, "max_frame");
-                uint segment = optional_uint(json, "segment");
+                uint max_message = reader.optional_uint("max_frame");
+                uint segment = reader.optional_uint("segment");
 
                 import urt.conv : parse_uint;
                 import urt.encoding : hex_decode;
                 import manager.sync.discovery : PeerRole, role_from_name;
                 ulong nid = 0;
-                if (const(char)[] node = optional_str(json, "node"))
+                if (const(char)[] node = reader.optional_str("node"))
                     nid = parse_uint(node, null, 16);
                 PeerRole role;
-                if (const(char)[] role_str = optional_str(json, "role"))
+                if (const(char)[] role_str = reader.optional_str("role"))
                     role_from_name(role_str, role);
                 ubyte[16] nonce_buf = void;
                 const(ubyte)[] nonce;
-                if (const(char)[] nonce_str = optional_str(json, "nonce"))
+                if (const(char)[] nonce_str = reader.optional_str("nonce"))
                 {
                     if (hex_decode(nonce_str, nonce_buf[]) == 16)
                         nonce = nonce_buf[];
                 }
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_hello(peer, caps, max_message, nid, role, nonce, segment);
                 break;
             }
 
             case "identity":
-                if (!bad_frame)
-                    sync.inbound_identity(peer, optional_str(json, "host"), optional_str(json, "cluster"));
+                if (!reader.failed)
+                    sync.inbound_identity(peer, reader.optional_str("host"), reader.optional_str("cluster"));
                 break;
 
             case "claim":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] cluster = optional_str(json, "cluster");
-                uint priority = optional_uint(json, "priority");
-                const(char)[] auth = optional_str(json, "auth");
-                const(char)[] key = optional_str(json, "key");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                const(char)[] cluster = reader.optional_str("cluster");
+                uint priority = reader.optional_uint("priority");
+                const(char)[] auth = reader.optional_str("auth");
+                const(char)[] key = reader.optional_str("key");
+                if (!reader.failed)
                     sync.inbound_claim(peer, seq, cluster, priority, auth, key);
                 break;
             }
@@ -1014,87 +903,89 @@ nothrow @nogc:
                 {
                     if (!fmt.isObject)
                     {
-                        bad("format");
+                        reader.bad("format");
                         break;
                     }
+                    reader.object = fmt;
                     WireFormat wf;
-                    wf.type = require_str(*fmt, "type");
-                    wf.series = optional_str(*fmt, "series");
-                    uint count = optional_uint(*fmt, "count", 1);
+                    wf.type = reader.require_str("type");
+                    wf.series = reader.optional_str("series");
+                    uint count = reader.optional_uint("count", 1);
                     if (count > ubyte.max)
-                        bad("count");
+                        reader.bad("count");
                     wf.count = cast(ubyte)count;
-                    wf.rate = optional_uint(*fmt, "rate");
-                    wf.unit = optional_str(*fmt, "unit");
-                    wf.enum_name = optional_str(*fmt, "enum");
+                    wf.rate = reader.optional_uint("rate");
+                    wf.unit = reader.optional_str("unit");
+                    wf.enum_name = reader.optional_str("enum");
                     if (Variant* mn = fmt.getMember("min"))
                         wf.min = *mn;
                     if (Variant* mx = fmt.getMember("max"))
                         wf.max = *mx;
                     if (Variant* st = fmt.getMember("step"))
                         wf.step = *st;
-                    uint ft = require_uint(json, "ft");
-                    if (!bad_frame)
+                    reader.object = &json;
+                    uint ft = reader.require_uint("ft");
+                    if (!reader.failed)
                         sync.inbound_type_format(peer, ft, wf);
                     break;
                 }
-                const(char)[] name = require_str(json, "name");
+                const(char)[] name = reader.require_str("name");
                 Variant* members = json.getMember("members");
                 if (members)
                 {
                     if (!members.isObject)
-                        bad("members");
+                        reader.bad("members");
                     else
                         foreach (k, ref v; *members)
                         {
                             if (!v.isLong)
                             {
-                                bad("members");
+                                reader.bad("members");
                                 break;
                             }
                         }
                 }
                 Variant empty;
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_type_enum(peer, name, members ? *members : empty);
                 break;
             }
 
             case "add":
             {
-                SyncHandle h = require_handle(json, "h");
-                const(char)[] path = require_str(json, "path");
-                const(char)[] cls = require_str(json, "class");
-                uint ft = optional_uint(json, "ft", uint.max);
-                const(char)[] access = optional_str(json, "access");
-                const(char)[] templates = optional_str(json, "tmpl");
+                SyncHandle h = reader.require_handle("h");
+                const(char)[] path = reader.require_str("path");
+                const(char)[] cls = reader.require_str("class");
+                uint ft = reader.optional_uint("ft", uint.max);
+                const(char)[] access = reader.optional_str("access");
+                const(char)[] templates = reader.optional_str("tmpl");
                 ulong peer_id;
-                if (const(char)[] owner = optional_str(json, "peer"))
+                if (const(char)[] owner = reader.optional_str("peer"))
                 {
                     if (!parse_peer_id(owner, peer_id))
-                        bad("peer");
+                        reader.bad("peer");
                 }
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_model_add(peer, h, path, cls, templates, ft, access, peer_id);
                 break;
             }
 
             case "val":
             {
-                SyncHandle h = require_handle(json, "h");
+                SyncHandle h = reader.require_handle("h");
                 Variant* smp = json.getMember("s");
                 if (!smp || !smp.isArray)
-                    bad("s");
+                    reader.bad("s");
                 else for (size_t i = 0; i < smp.length(); ++i)
                 {
                     ref Variant pair = (*smp)[i];
                     if (!pair.isArray || pair.length() != 2 || !pair[0].isUlong)
                     {
-                        bad("s");
+                        reader.bad("s");
                         break;
                     }
                 }
-                if (bad_frame)
+                if (reader.failed)
                     break;
                 for (size_t i = 0; i < smp.length(); ++i)
                 {
@@ -1106,18 +997,18 @@ nothrow @nogc:
 
             case "res":
             {
-                uint seq = require_uint(json, "seq");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                if (!reader.failed)
                     sync.inbound_res(peer, seq, json.getMember("value"));
                 break;
             }
 
             case "err":
             {
-                uint seq = require_uint(json, "seq");
-                const(char)[] code = optional_str(json, "code");
-                const(char)[] text = optional_str(json, "text");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                const(char)[] code = reader.optional_str("code");
+                const(char)[] text = reader.optional_str("text");
+                if (!reader.failed)
                     sync.inbound_err(peer, seq, code, text);
                 break;
             }
@@ -1129,7 +1020,7 @@ nothrow @nogc:
                 {
                     if (!pats.isArray)
                     {
-                        bad("patterns");
+                        reader.bad("patterns");
                         break;
                     }
                     Array!(const(char)[]) patterns;
@@ -1137,45 +1028,45 @@ nothrow @nogc:
                     {
                         if (!(*pats)[i].isString)
                         {
-                            bad("patterns");
+                            reader.bad("patterns");
                             break;
                         }
                         patterns ~= (*pats)[i].asString();
                     }
-                    if (!bad_frame)
+                    if (!reader.failed)
                         sync.inbound_model_unsub(peer, patterns[]);
                     break;
                 }
-                const(char)[] pattern = require_str(json, "pattern");
-                if (!bad_frame)
+                const(char)[] pattern = reader.require_str("pattern");
+                if (!reader.failed)
                     sync.inbound_unsub(peer, pattern);
                 break;
             }
 
             case "enum_req":
             {
-                const(char)[] type = require_str(json, "type");
-                uint seq = require_uint(json, "seq");
-                if (!bad_frame)
+                const(char)[] type = reader.require_str("type");
+                uint seq = reader.require_uint("seq");
+                if (!reader.failed)
                     sync.inbound_enum_req(peer, type, seq);
                 break;
             }
 
             case "enum":
             {
-                const(char)[] type = require_str(json, "type");
-                uint seq = optional_uint(json, "seq");
+                const(char)[] type = reader.require_str("type");
+                uint seq = reader.optional_uint("seq");
                 Variant* members = json.getMember("members");
                 Variant empty;
-                if (!bad_frame)
+                if (!reader.failed)
                     sync.inbound_enum(peer, type, members ? *members : empty, seq);
                 break;
             }
 
             case "log_sub":
             {
-                const(char)[] sev_str = require_str(json, "severity");
-                if (bad_frame)
+                const(char)[] sev_str = reader.require_str("severity");
+                if (reader.failed)
                     break;
                 bool off = sev_str == "off";
                 Severity sev = Severity.info;
@@ -1189,8 +1080,8 @@ nothrow @nogc:
                     }
                     sev = *sv;
                 }
-                const(char)[] tag = optional_str(json, "tag");
-                if (!bad_frame)
+                const(char)[] tag = reader.optional_str("tag");
+                if (!reader.failed)
                     sync.inbound_log_sub(peer, sev, off, tag);
                 break;
             }
@@ -1209,8 +1100,8 @@ nothrow @nogc:
 
             case "time_req":
             {
-                uint seq = require_uint(json, "seq");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                if (!reader.failed)
                     sync.inbound_time_req(peer, seq);
                 break;
             }
@@ -1218,20 +1109,20 @@ nothrow @nogc:
             case "time_resp":
             {
                 // an incomplete response must never discipline the clock toward zero
-                uint seq = require_uint(json, "seq");
-                ulong recv = require_ulong(json, "recv");
-                ulong xmit = require_ulong(json, "xmit");
-                uint ver = require_uint(json, "ver");
-                if (!bad_frame)
+                uint seq = reader.require_uint("seq");
+                ulong recv = reader.require_ulong("recv");
+                ulong xmit = reader.require_ulong("xmit");
+                uint ver = reader.require_uint("ver");
+                if (!reader.failed)
                     sync.inbound_time_resp(peer, seq, recv, xmit, ver);
                 break;
             }
 
             case "time_push":
             {
-                uint ver = require_uint(json, "ver");
-                long delta = require_long(json, "delta");
-                if (!bad_frame)
+                uint ver = reader.require_uint("ver");
+                long delta = reader.require_long("delta");
+                if (!reader.failed)
                     sync.inbound_time_push(peer, ver, delta);
                 break;
             }
@@ -1308,6 +1199,30 @@ nothrow @nogc:
 
 private:
     Array!char _buf;
+
+    void encode_text_command(SyncPeer peer, const(char)[] verb, uint seq, const(char)[] text)
+    {
+        begin_frame(verb);
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"text\":");
+        write_str(text);
+        send_frame(peer);
+    }
+
+    void begin_property_frame(SyncPeer peer, const(char)[] verb, CID target, const(char)[] prop_name)
+    {
+        begin_frame(verb);
+        _buf.append(",\"target\":", peer.handle_of(target));
+        _buf.append(",\"prop\":");
+        write_str(prop_name);
+    }
+
+    void finish_property_frame(SyncPeer peer, uint seq)
+    {
+        if (seq)
+            _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
 
     void begin_frame(const(char)[] kind)
     {
@@ -1418,6 +1333,108 @@ private:
     }
 }
 
+private struct JsonFrameReader
+{
+nothrow @nogc:
+
+    Variant* object;
+    bool failed;
+
+    void bad(const(char)[] name)
+    {
+        if (!failed)
+            JsonEncoder.log.warning("bad or missing field '", name, "'");
+        failed = true;
+    }
+
+    uint require_uint(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (m && m.isUint)
+            return m.asUint();
+        bad(name);
+        return 0;
+    }
+
+    uint optional_uint(const(char)[] name, uint def = 0)
+    {
+        Variant* m = object.getMember(name);
+        if (!m)
+            return def;
+        if (m.isUint)
+            return m.asUint();
+        bad(name);
+        return def;
+    }
+
+    ulong require_ulong(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (m && m.isUlong)
+            return m.asUlong();
+        bad(name);
+        return 0;
+    }
+
+    ulong optional_ulong(const(char)[] name, ulong def = 0)
+    {
+        Variant* m = object.getMember(name);
+        if (!m)
+            return def;
+        if (m.isUlong)
+            return m.asUlong();
+        bad(name);
+        return def;
+    }
+
+    long require_long(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (m && m.isLong)
+            return m.asLong();
+        bad(name);
+        return 0;
+    }
+
+    const(char)[] require_str(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (m && m.isString)
+            return m.asString();
+        bad(name);
+        return null;
+    }
+
+    const(char)[] optional_str(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (!m || m.isNull)
+            return null;
+        if (m.isString)
+            return m.asString();
+        bad(name);
+        return null;
+    }
+
+    bool optional_bool(const(char)[] name)
+    {
+        Variant* m = object.getMember(name);
+        if (!m)
+            return false;
+        if (m.isBool)
+            return m.isTrue;
+        bad(name);
+        return false;
+    }
+
+    SyncHandle require_handle(const(char)[] name)
+        => cast(SyncHandle)require_ulong(name);
+
+    SyncHandle optional_handle(const(char)[] name)
+        => cast(SyncHandle)optional_ulong(name, SyncPeer.invalid_handle);
+}
+
+
 unittest
 {
     // pins the range-checked predicate semantics the decoder gates every as*() behind
@@ -1443,6 +1460,12 @@ unittest
     assert(!e.isUint && e.isUlong && e.isLong);
 
     assert(v.getMember("missing") is null);
+
+    JsonFrameReader reader = JsonFrameReader(&v);
+    assert(reader.optional_uint("missing", 1) == 1 && !reader.failed);
+    assert(reader.optional_str("missing") is null && !reader.failed);
+    assert(reader.require_uint("d") == 7 && !reader.failed);
+    assert(reader.optional_uint("a", 1) == 1 && reader.failed);
 
     ulong peer_id;
     assert(JsonEncoder.parse_peer_id("0123456789abcdef", peer_id));

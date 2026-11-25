@@ -176,42 +176,30 @@ nothrow @nogc:
         if (!p.get)
             return;
 
-        begin_frame(Verb.set);
-        _buf.put_varint(peer.handle_of(obj));
-        _buf.put_str(p.name[]);
+        begin_property_frame(peer, Verb.set, obj.id, p.name[]);
         Variant v = p.get(obj, *p);
         _buf.put_variant(v);
-        _buf.put_varint(seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq)
     {
-        begin_frame(Verb.set);
-        _buf.put_varint(peer.handle_of(target));
-        _buf.put_str(prop_name);
+        begin_property_frame(peer, Verb.set, target, prop_name);
         _buf.put_variant(value);
-        _buf.put_varint(seq);
-        send_frame(peer);
+        finish_property_frame(peer, seq);
     }
 
     override void encode_reset(SyncPeer peer, CID target, const(char)[] prop_name, uint seq)
     {
-        begin_frame(Verb.reset);
-        _buf.put_varint(peer.handle_of(target));
-        _buf.put_str(prop_name);
-        _buf.put_varint(seq);
-        send_frame(peer);
+        begin_property_frame(peer, Verb.reset, target, prop_name);
+        finish_property_frame(peer, seq);
     }
 
     // Outbound: commands, errors, enums, subscriptions
 
     override void encode_cmd(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame(Verb.cmd);
-        _buf.put_varint(seq);
-        _buf.put_str(text);
-        send_frame(peer);
+        encode_text_command(peer, Verb.cmd, seq, text);
     }
 
     override int encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text)
@@ -225,18 +213,12 @@ nothrow @nogc:
 
     override void encode_error(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame(Verb.error);
-        _buf.put_varint(seq);
-        _buf.put_str(text);
-        send_frame(peer);
+        encode_text_command(peer, Verb.error, seq, text);
     }
 
     override void encode_suggest(SyncPeer peer, uint seq, const(char)[] text)
     {
-        begin_frame(Verb.suggest);
-        _buf.put_varint(seq);
-        _buf.put_str(text);
-        send_frame(peer);
+        encode_text_command(peer, Verb.suggest, seq, text);
     }
 
     override void encode_suggestions(SyncPeer peer, uint seq, const(String)[] suggestions, const(char)[] completed)
@@ -1101,6 +1083,27 @@ nothrow @nogc:
 private:
     Array!ubyte _buf;
 
+    void encode_text_command(SyncPeer peer, Verb verb, uint seq, const(char)[] text)
+    {
+        begin_frame(verb);
+        _buf.put_varint(seq);
+        _buf.put_str(text);
+        send_frame(peer);
+    }
+
+    void begin_property_frame(SyncPeer peer, Verb verb, CID target, const(char)[] prop_name)
+    {
+        begin_frame(verb);
+        _buf.put_varint(peer.handle_of(target));
+        _buf.put_str(prop_name);
+    }
+
+    void finish_property_frame(SyncPeer peer, uint seq)
+    {
+        _buf.put_varint(seq);
+        send_frame(peer);
+    }
+
     void begin_frame(Verb verb)
     {
         _buf.clear();
@@ -1291,23 +1294,30 @@ nothrow @nogc:
 
     ulong varint()
     {
-        ulong v = 0;
-        uint shift = 0;
-        for (;;)
+        // Preserve the cursor advance when a caller continues after failure.
+        if (fail)
         {
-            ubyte b = u8();
-            if (fail)
-                return 0;
-            v |= ulong(b & 0x7F) << shift;
-            if (!(b & 0x80))
-                return v;
-            shift += 7;
-            if (shift >= 64)
-            {
-                fail = true;
-                return 0;
-            }
+            u8();
+            return 0;
         }
+
+        enum max_bytes = 10;
+        size_t end = pos + (remaining < max_bytes ? remaining : max_bytes);
+        ulong value;
+        uint shift;
+        foreach (i, b; buf[pos .. end])
+        {
+            value |= ulong(b & 0x7F) << shift;
+            if (b < 0x80)
+            {
+                pos += i + 1;
+                return value;
+            }
+            shift += 7;
+        }
+        pos = end;
+        fail = true;
+        return 0;
     }
 
     long zigzag()
@@ -1430,6 +1440,14 @@ unittest
         Reader r = Reader(buf[]);
         assert(r.varint() == v && !r.fail);
     }
+    ubyte[11] unterminated;
+    unterminated[0 .. 10] = 0x80;
+    unterminated[10] = 1;
+    Reader short_varint = Reader(unterminated[0 .. 9]);
+    assert(short_varint.varint() == 0 && short_varint.fail && short_varint.remaining == 0);
+    Reader long_varint = Reader(unterminated[]);
+    assert(long_varint.varint() == 0 && long_varint.fail && long_varint.remaining == 1);
+
     foreach (long v; [long(0), -1, 1, -64, 63, long.min, long.max])
     {
         buf.clear();
