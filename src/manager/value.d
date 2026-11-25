@@ -517,28 +517,26 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
 {
     alias Type = Unqual!T;
 
-    if (v.isNull)
-    {
-        r = null;
-        return null;
-    }
-    if (v.isUser!Type)
-    {
-        r = cast(Type)cast(void*)v.asUser!Type;
-        return null;
-    }
-    if (!v.isString)
-        return "Invalid value";
+    import urt.typereg : UserTypeId;
 
     static if (is(typeof(Type.type_name)))
     {
         BaseObject item;
-        const(char)[] error = resolve_collection_item(v.asString, collection_type_info!Type(), collection_type_info!(CollectionRoot!Type)(), item);
+        const(char)[] error = resolve_collection_item(v, UserTypeId!Type, collection_type_info!Type(), collection_type_info!(CollectionRoot!Type)(), item);
         r = cast(Type)cast(void*)item;
         return error;
     }
     else
     {
+        const(void)* object;
+        if (v.isNull || v.try_class_user(UserTypeId!Type, object))
+        {
+            r = cast(Type)cast(void*)object;
+            return null;
+        }
+        if (!v.isString)
+            return "Invalid value";
+
         const(char)[] tail = v.asString;
         const(char)[] type = tail.split!':';
         // abstract (BaseObject, ActiveObject, ...) - `type:` prefix is required
@@ -563,8 +561,20 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     }
 }
 
-private const(char)[] resolve_collection_item(const(char)[] name, const(CollectionTypeInfo)* expected, const(CollectionTypeInfo)* root, out BaseObject item)
+private const(char)[] resolve_collection_item(ref const Variant v, uint type_id, const(CollectionTypeInfo)* expected, const(CollectionTypeInfo)* root, out BaseObject item)
 {
+    if (v.isNull)
+        return null;
+    const(void)* object;
+    if (v.try_class_user(type_id, object))
+    {
+        item = cast(BaseObject)cast(void*)object;
+        return null;
+    }
+    if (!v.isString)
+        return "Invalid value";
+
+    const(char)[] name = v.asString;
     const(char)[] tail = name;
     const(char)[] type = tail.split!':';
     if (!tail.empty)
