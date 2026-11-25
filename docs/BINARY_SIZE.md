@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | subscriber dispatch baseline |
+| 2026-11-11 | codex/router-subscriber-dispatch | ldc 1.43.0 | 3,876,092 | 120,824 | - | fixed-slot dispatch on 8a145cbd; 8,180 B smaller |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
