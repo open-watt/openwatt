@@ -321,26 +321,20 @@ nothrow @nogc:
                     return "incompatible value";
                 else
                 {
-                    if (!data_format.is_scalar || data_format.type != ValueType.user || data_format.user_type.type_id != TypeDetailsFor!U.type_id)
-                        return "incompatible value";
                     Scalar s;
                     s.u = 0;
                     s.raw[0 .. U.sizeof] = (cast(const(ubyte)*)&v)[0 .. U.sizeof];
+                    return try_write_scalar(s, ValueType.user, TypeDetailsFor!U.type_id, t, who);
                 }
             }
             else
             {
-                if (!data_format.is_scalar || scalar_type!T != data_format.type)
-                    return "incompatible value";
                 static if (is(T Base == enum))
                     Scalar s = Scalar.of(cast(Base)v);
                 else
                     Scalar s = Scalar.of(v);
+                return try_write_scalar(s, scalar_type!T, 0, t, who);
             }
-            if (const(char)[] error = data_format.constraint ? data_format.constraint.check(s, *data_format) : null)
-                return error;
-            store_record(s.raw[0 .. data_format.stride], t, who);
-            return null;
         }
     }
 
@@ -998,6 +992,17 @@ private:
     enum text_bucket_capacity = 64;     // text series are low-rate; keep resident buckets small
     // u16 record offsets cap the bucket heap at 64k; a small target cannot serve that much contiguous
     version (Tiny) enum text_heap_limit = 0x2000; else enum text_heap_limit = 0x1_0000;
+
+    const(char)[] try_write_scalar(Scalar value, ValueType expected, uint user_type_id, SysTime t, Subscriber who)
+    {
+        const(DataFormat)* f = data_format;
+        if (!f.is_scalar || f.type != expected || (expected == ValueType.user && f.user_type.type_id != user_type_id))
+            return "incompatible value";
+        if (const(char)[] error = f.constraint ? f.constraint.check(value, *f) : null)
+            return error;
+        store_record(value.raw[0 .. f.stride], t, who);
+        return null;
+    }
 
     const(char)[] update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
