@@ -15,12 +15,12 @@ import protocol.dhcp.server;
 nothrow @nogc:
 
 
-final class DHCPModule : Module
+struct DHCPModule
 {
-    mixin DeclareModule!"protocol.dhcp";
+    mixin DeclareStaticModule!"protocol.dhcp";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.register_enum!DHCPOptionType();
 
@@ -36,7 +36,7 @@ nothrow @nogc:
         }
     }
 
-    override void update()
+    static void update(void*)
     {
         Collection!DHCPClient().update_all();
         version (UseInternalIPStack)

@@ -363,12 +363,12 @@ private:
     }
 }
 
-final class ConsoleStreamModule : Module
+struct ConsoleStreamModule
 {
-    mixin DeclareModule!"stream.console";
+    mixin DeclareStaticModule!"stream.console";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.register_enum!ConsoleInput();
         g_app.register_enum!ConsoleOutput();

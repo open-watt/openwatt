@@ -1122,12 +1122,12 @@ private:
 }
 
 
-final class BuiltinWifiModule : Module
+struct BuiltinWifiModule
 {
-    mixin DeclareModule!"interface.wifi.builtin";
+    mixin DeclareStaticModule!"interface.wifi.builtin";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!BuiltinWiFi();
         g_app.console.register_collection!BuiltinWlan();

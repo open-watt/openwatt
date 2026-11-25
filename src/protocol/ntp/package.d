@@ -10,17 +10,17 @@ import protocol.ntp.client;
 nothrow @nogc:
 
 
-final class NTPModule : Module
+struct NTPModule
 {
-    mixin DeclareModule!"protocol.ntp";
+    mixin DeclareStaticModule!"protocol.ntp";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!NTPClient();
     }
 
-    override void update()
+    static void update(void*)
     {
         Collection!NTPClient().update_all();
     }

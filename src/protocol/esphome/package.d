@@ -15,18 +15,18 @@ nothrow @nogc:
 mixin LoadProtobuf!"protocol/esphome/api.proto";
 
 
-final class ESPHomeModule : Module
+struct ESPHomeModule
 {
-    mixin DeclareModule!"protocol.esphome";
+    mixin DeclareStaticModule!"protocol.esphome";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!ESPHomeClient();
         g_app.console.register_collection!ESPHomeBinding();
     }
 
-    override void update()
+    static void update(void*)
     {
         Collection!ESPHomeClient().update_all();
     }

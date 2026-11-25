@@ -156,12 +156,12 @@ private:
 }
 
 
-class USBSerialStreamModule : Module
+struct USBSerialStreamModule
 {
-    mixin DeclareModule!"stream.usb-serial";
+    mixin DeclareStaticModule!"stream.usb-serial";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!USBSerialStream();
     }

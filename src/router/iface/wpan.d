@@ -368,12 +368,12 @@ private:
 }
 
 
-final class WpanInterfaceModule : Module
+struct WpanInterfaceModule
 {
-    mixin DeclareModule!"interface.wpan";
+    mixin DeclareStaticModule!"interface.wpan";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         register_packet_codec!WpanFrame();
     }

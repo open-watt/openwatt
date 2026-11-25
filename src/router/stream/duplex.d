@@ -191,12 +191,12 @@ private:
 }
 
 
-final class DuplexStreamModule : Module
+struct DuplexStreamModule
 {
-    mixin DeclareModule!"stream.duplex";
+    mixin DeclareStaticModule!"stream.duplex";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!DuplexStream();
     }

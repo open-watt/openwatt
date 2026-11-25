@@ -197,12 +197,12 @@ private:
 }
 
 
-final class FileStreamModule : Module
+struct FileStreamModule
 {
-    mixin DeclareModule!"stream.file";
+    mixin DeclareStaticModule!"stream.file";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.register_enum!FileMode();
         g_app.console.register_collection!FileStream();

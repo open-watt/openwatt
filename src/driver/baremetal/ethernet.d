@@ -441,12 +441,12 @@ void port_service(ref MacPort p)
 }
 
 
-final class BuiltinEthernetModule : Module
+struct BuiltinEthernetModule
 {
-    mixin DeclareModule!"interface.ethernet.builtin";
+    mixin DeclareStaticModule!"interface.ethernet.builtin";
 nothrow @nogc:
 
-    override void init()
+    static void init(void*)
     {
         g_app.console.register_collection!BuiltinEthernet();
         _service = register_doorbell(&service, EventPriority.bulk);

@@ -72,15 +72,24 @@ struct PortInfo
     String serial;
 }
 
-final class PortModule : Module
+struct PortModule
 {
-    mixin DeclareModule!"router.port";
+    mixin DeclareStaticModule!"router.port";
 nothrow @nogc:
 
-    override void init()
+    static __gshared PortModule module_state;
+
+    static void init(void*)
     {
         g_app.register_enum!PortKind();
-        g_app.console.register_command!(port_print, "print")("/port", this);
+        g_app.console.register_command!(port_print_command, "print")("/port", null);
+    }
+
+    static void deinit(void* state)
+    {
+        auto ports = cast(PortModule*)state;
+        ports._ports.clear();
+        ports._generation = 0;
     }
 
     const(PortInfo)[] ports() const pure
@@ -194,29 +203,34 @@ private:
     }
 }
 
+static assert(__traits(isZeroInit, PortModule));
+
+private void port_print_command(Session session, Nullable!PortKind kind)
+    => PortModule.module_state.port_print(session, kind);
+
+
 PortInfo* port_add(PortKind kind, const(char)[] id, const(char)[] name,
                    const(char)[] path = null, const(char)[] driver = null,
                    const(char)[] description = null, PortFlags flags = PortFlags.none,
                    PortUsb usb = PortUsb.init)
 {
-    PortModule mod = get_module!PortModule;
-    return mod ? mod.add(kind, id, name, path, driver, description, flags, usb) : null;
+    auto mod = &PortModule.module_state;
+    return mod.add(kind, id, name, path, driver, description, flags, usb);
 }
 
 bool port_remove(PortKind kind, const(char)[] id)
 {
-    PortModule mod = get_module!PortModule;
-    return mod ? mod.remove(kind, id) : false;
+    auto mod = &PortModule.module_state;
+    return mod.remove(kind, id);
 }
 
 void port_remove_driver(const(char)[] driver)
 {
-    if (PortModule mod = get_module!PortModule)
-        mod.remove_driver(driver);
+    PortModule.module_state.remove_driver(driver);
 }
 
 const(PortInfo)[] port_list()
 {
-    PortModule mod = get_module!PortModule;
-    return mod ? mod.ports : null;
+    auto mod = &PortModule.module_state;
+    return mod.ports;
 }

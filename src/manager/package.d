@@ -317,8 +317,8 @@ bool ring_from_isr(ubyte doorbell)
 
 void shutdown_application()
 {
-    foreach (m; g_app.modules)
-        m.deinit();
+    foreach (ref m; registrations)
+        m.run(ModulePhase.deinit);
 
     free(g_app);
 
@@ -334,10 +334,7 @@ void shutdown_application()
 Mod get_module(Mod)()
     if (is(Mod : Module))
 {
-    __gshared Mod g_module_instance = null;
-    if (!g_module_instance)
-        g_module_instance = cast(Mod)cast(void*)g_app.module_instance(Mod.ModuleName);
-    return g_module_instance;
+    return cast(Mod)cast(void*)legacy_instance!Mod;
 }
 
 
@@ -373,8 +370,6 @@ nothrow @nogc:
     }
 
     String name;
-
-    Array!Module modules;
 
     Console console;
     Map!(String, IntrinsicFunction) intrinsic_functions;
@@ -521,16 +516,18 @@ nothrow @nogc:
         import manager.sample.codec : register_builtin_encodings;
         register_builtin_encodings();
 
-        register_modules(this);
+        foreach (ref m; registrations)
+            if (m.construct)
+                m.construct(this);
 
-        foreach (m; modules)
-            m.pre_init();
+        foreach (ref m; registrations)
+            m.run(ModulePhase.pre_init);
 
-        foreach (m; modules)
-            m.init();
+        foreach (ref m; registrations)
+            m.run(ModulePhase.init);
 
-        foreach (m; modules)
-            m.post_init();
+        foreach (ref m; registrations)
+            m.run(ModulePhase.post_init);
 
         console.freeze();
 
@@ -587,31 +584,6 @@ nothrow @nogc:
             return false;
         _profile_path_overridden = true;
         return true;
-    }
-
-    void register_module(Module mod)
-    {
-        import urt.string.format;
-
-        foreach (m; modules)
-            assert(m.module_name[] != mod.module_name, tconcat("Module '", mod.module_name, "' already registered!"));
-
-        mod.module_id = modules.length;
-        modules ~= mod;
-    }
-
-    Module module_instance(const(char)[] name) pure
-    {
-        foreach (i; 0 .. modules.length)
-            if (modules[i].module_name[] == name[])
-                return modules[i];
-        return null;
-    }
-
-    Mod module_instance(Mod)() pure
-        if (is(Mod : Module))
-    {
-        return cast(Mod)cast(void*)module_instance(Mod.ModuleName);
     }
 
     bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
@@ -1047,31 +1019,9 @@ nothrow @nogc:
         const(char)[] worst_module_name;
         const(char)[] worst_module_phase;
 
-        foreach (m; modules)
-        {
-            MonoTime t = getTime();
-            m.pre_update();
-            Duration d = getTime() - t;
-            if (d > worst_module_dur)
-            {
-                worst_module_dur = d;
-                worst_module_name = m.module_name[];
-                worst_module_phase = "pre_update";
-            }
-        }
+        run_module_updates(ModulePhase.pre_update, "pre_update", worst_module_dur, worst_module_name, worst_module_phase);
 
-        foreach (m; modules)
-        {
-            MonoTime t = getTime();
-            m.update();
-            Duration d = getTime() - t;
-            if (d > worst_module_dur)
-            {
-                worst_module_dur = d;
-                worst_module_name = m.module_name[];
-                worst_module_phase = "update";
-            }
-        }
+        run_module_updates(ModulePhase.update, "update", worst_module_dur, worst_module_name, worst_module_phase);
 
         import urt.async : async_update;
         MonoTime async_t = getTime();
@@ -1105,18 +1055,7 @@ nothrow @nogc:
             worst_module_phase = "binding.update";
         }
 
-        foreach (m; modules)
-        {
-            MonoTime t = getTime();
-            m.post_update();
-            Duration d = getTime() - t;
-            if (d > worst_module_dur)
-            {
-                worst_module_dur = d;
-                worst_module_name = m.module_name[];
-                worst_module_phase = "post_update";
-            }
-        }
+        run_module_updates(ModulePhase.post_update, "post_update", worst_module_dur, worst_module_name, worst_module_phase);
 
         Duration total = getTime() - tick_start;
         if (total.as!"msecs" >= SlowTickThresholdMs)
@@ -1126,6 +1065,26 @@ nothrow @nogc:
         }
     }
 
+
+    private static void run_module_updates(ModulePhase phase, const(char)[] phase_name, ref Duration worst_duration, ref const(char)[] worst_module, ref const(char)[] worst_phase)
+    {
+        foreach (ref entry; registrations)
+        {
+            auto hook = entry.hooks[phase];
+            if (!hook)
+                continue;
+
+            MonoTime start = getTime();
+            hook(cast(void*)entry.state);
+            Duration elapsed = getTime() - start;
+            if (elapsed > worst_duration)
+            {
+                worst_duration = elapsed;
+                worst_module = entry.name;
+                worst_phase = phase_name;
+            }
+        }
+    }
 
     // Shared profile registry: one parse per name, shared by every consumer.
     // Restarting objects release on shutdown and re-acquire on startup, binding
