@@ -256,7 +256,8 @@ private:
             {
                 log.error("ota_end failed: ", err);
                 end_indication(_upgrading);
-                send_response(stream, req, 500, "ota_end failed");
+                send_response(stream, req, 500, err == ota_outcome_unknown
+                    ? "ota_end failed; the image may still activate on the next restart" : "ota_end failed");
                 return -1;
             }
 
