@@ -48,6 +48,11 @@ jobs:
         with:
           compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
 
+      - name: Test cold reporter cache concurrency
+        if: ${{ matrix.arch == 'x86_64' && matrix.compiler == 'ldc' }}
+        shell: bash
+        run: python test/test_binstats.py COMPILER=ldc ARCH=x86_64 OS=${{ matrix.os }}
+
       # Linux needs mbedtls for TLS/crypto support
       - name: Install mbedtls (Linux)
         if: ${{ matrix.os == 'linux' }}

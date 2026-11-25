@@ -11,9 +11,9 @@ never recorded.
 ## How to measure
 
 Every build prints its footprint from [tools/binstats.d](../tools/binstats.d), a host tool
-the Makefile builds with the same compiler, after the link (or after `idf.py` for ESP
-targets). A release build also prints a `ledger` line, which
-is the row to paste here:
+the Makefile caches in `obj/host/` with the same host compiler, after the link (or
+after `idf.py` for ESP targets). No `rdmd` is required. A release build also prints a
+`ledger` line, which is the row to paste here:
 
 ```
 === bin/bk7231n_release/openwatt ===
@@ -35,7 +35,7 @@ linker's `_image_limit` symbol on urt bare-metal targets and from the smallest a
 on ESP targets. To measure an existing binary by hand:
 
 ```
-bin/host/binstats bin/<outdir>/openwatt [--image bin/<outdir>/fw.bin]
+obj/host/binstats bin/<outdir>/openwatt [--image bin/<outdir>/fw.bin]
 ```
 
 ## Row format
@@ -64,6 +64,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-18 | cd7edf82 | ldc 1.43.0 | 3,887,964 | 153,592 | - | matched #947 master baseline |
 | 2026-11-18 | 0142be42 | ldc 1.43.0 | 3,890,832 | 153,592 | - | #947 before cleanup; +2,868 B vs cd7edf82 |
 | 2026-11-18 | #947 | ldc 1.43.0 | 3,888,924 | 153,592 | - | shared transmit body and style cleanup; +960 B vs cd7edf82, RAM unchanged |
+| 2026-11-19 | codex/compiled-binstats | ldc 1.43.0 | 3,888,924 | 153,592 | - | cached host reporter with rdmd absent; runtime source 89ff4a6e, unchanged size |
 | 2026-11-24 | 79b58c6d | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 matched master control |
 | 2026-11-24 | 0f8bd52d | ldc 1.43.0 | 3,878,656 | 153,592 | - | #983 runtime-owned process pool, urt c127e542; +304 B, RAM flat |
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
@@ -230,6 +231,7 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-11 | 8a145cbd | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | master, control for E5c ASH/CPC packets |
 | 2026-11-11 | #965 | ldc 1.43.0 | 1,609,500 | 46,412 | 4,194,304 | ASH and CPC queue the producer's packet, not a 128/256-byte buffer per message, and warn and count a drop when a message cannot be allocated: +0 flash |
 | 2026-11-18 | #947 (d5dd6cca) | ldc 1.43.0 | 1,609,348 | 46,412 | 4,194,304 | matched release vs cd7edf82 (1,609,268 B); +80 B, RAM unchanged |
+| 2026-11-19 | codex/compiled-binstats | ldc 1.43.0 | 1,609,348 | 46,412 | 4,194,304 | WSL release, cached host reporter with rdmd absent; limit from linker FLASH region |
 | 2026-11-24 | 79b58c6d | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 matched master control |
 | 2026-11-24 | 0f8bd52d | ldc 1.43.0 | 1,601,796 | 46,428 | 4,194,304 | #983 runtime-owned process pool, urt c127e542; +80 B, RAM flat |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 source with size-fix probes, not its pinned runtime; startup-only, forwarding and final shared-iterator probes all image-neutral; final sections match 79b58c6d; BUILD_ID=unknown |
