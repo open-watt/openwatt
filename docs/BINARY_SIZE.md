@@ -138,6 +138,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
 | 2026-11-19 | 89ff4a6e | ldc 1.42.0 | 3,010,784 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; master control row for #915 |
 | 2026-11-19 | ow/sync-rdp | ldc 1.42.0 | 3,004,224 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; #915: sync over RDP, reliability sublayer deleted, one endpoint set for discovery and the sync server, writable on the RDP session timer: -6,560 vs master 89ff4a6e (3,010,784) |
+| 2026-11-25 | #992 | ldc 1.42.0 | 2,948,272 | 138,507 | 4,194,304 | no `COREDUMP`; CI dispatch 45523062718, ESP-IDF v6.1, master 096172ce |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -181,6 +182,15 @@ Limit is the stock 0x1b0000 `ota_0` partition, which the in-place migration must
 | 2026-11-25 | c5c2e70b | ldc 1.42.0 | 1,740,112 | 98,312 | 1,769,472 | ESP-IDF v6.1, matched compiler input order for the following rows |
 | 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 1,736,352 | 98,312 | 1,769,472 | shared collection cursor and reference lookup |
 | 2026-11-25 | codex/embedded-code-size | ldc 1.42.0 | 1,724,368 | 98,312 | 1,769,472 | also share property marking, 45,104 bytes free |
+| 2026-11-25 | #992 | ldc 1.42.0 | 1,722,144 | 98,312 | 1,769,472 | CI dispatch 45523062718, ESP-IDF v6.1, master 096172ce; 47,328 bytes free |
+
+### ESP32-P4 reference devkit, `make esp-idf-build PLATFORM=esp32-p4 CONFIG=release`
+
+Limit is the 3 MB `ota_0` partition.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #992 | ldc 1.42.0 | 2,422,784 | 64,820 | 3,145,728 | first row; CI dispatch 45523062718, ESP-IDF v6.1, master 096172ce |
 
 ### Wireless-Tag WT99P4C5-S1, `make esp-idf-build BOARD=wt99p4c5-s1 CONFIG=release`
 

@@ -1634,8 +1634,14 @@ this is what remains.
 
 - **Move Xtensa to LDC 1.43 when esp-clang reaches LLVM 22**: LDC 1.43 emits LLVM 22 bitcode,
   which no esp-clang yet reads (the latest, esp-21.1.3, is LLVM 21), so Xtensa firmware is
-  pinned to LDC 1.42 and the makefile refuses a newer one. Espressif has shipped a major every
-  six months or so; re-check when the next esp-clang lands.
+  pinned to LDC 1.42 and the makefile refuses a newer one. CI pins it too (`cross-esp` in
+  `.github/workflows/ci.yml`, with its `IDF_REF`), and the makefile does not catch a CI pin left
+  behind, so move both together. Espressif has shipped a major every six months or so; re-check
+  when the next esp-clang lands.
+
+- **Pull request CI builds no ESP firmware**: the IDF setup and firmware steps run only on a
+  `release` push or a manual dispatch, so a toolchain or link break passes every PR. Decide
+  whether PR CI should build at least one ESP target.
 
 - **Harden bindings against malformed remote input**: the `ow/dm` review found protocol
   bindings that abort or deref on data an attacker controls, and these survive. MQTT's
