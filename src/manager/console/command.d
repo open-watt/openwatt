@@ -54,19 +54,8 @@ nothrow @nogc:
 struct CommandDesc
 {
 nothrow @nogc:
-    alias GenericCall = const(char)[] function(Session session, out CommandState state, const Variant[] args, const NamedArgument[] named_args, void* instance) nothrow @nogc;
-    alias CustomSuggestFn = Array!String function(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc;
-
     immutable(CommandClass)* cls;
     String name;
-
-    GenericCall fn;
-    immutable(FunctionArgument)[] args;
-    CustomSuggestFn custom_suggest;
-
-    // slots for the `args`/`named-args` catch-all parameters; max = the command has none
-    ushort args_offset = ushort.max;
-    ushort named_args_offset = ushort.max;
 
     version (ExcludeHelpText) {} else
         String help_text;

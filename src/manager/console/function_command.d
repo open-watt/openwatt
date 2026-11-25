@@ -59,16 +59,41 @@ nothrow @nogc:
 }
 
 
+private struct FunctionCommandDesc
+{
+    alias GenericCall = const(char)[] function(Session session, out CommandState state, void* args, void* instance, bool ready) nothrow @nogc;
+    alias CustomSuggestFn = Array!String function(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc;
+
+    CommandDesc command;
+    GenericCall fn;
+    immutable(FunctionArgument)[] args;
+    CustomSuggestFn custom_suggest;
+    const(void)* args_init;
+    ushort args_size;
+
+    // Max denotes an absent catch-all parameter.
+    ushort args_offset = ushort.max;
+    ushort named_args_offset = ushort.max;
+}
+
+static assert(FunctionCommandDesc.command.offsetof == 0);
+
+private ref immutable(FunctionCommandDesc) function_desc(ref const Command cmd)
+    => *cast(immutable(FunctionCommandDesc)*)cmd.desc;
+
 template function_command_desc(alias fun, string command_name = null)
 {
     static assert(is(Parameters!fun[0] == Session), "First parameter must be manager.console.session.Session for command hander function");
 
     private enum FunctionName = transform_command_name(__traits(identifier, fun));
 
-    private static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
+    private static const(char)[] function_adapter(Session session, out CommandState state, void* buffer, void* _instance, bool ready)
     {
-        ArgTuple _args;
-        if (!marshal_command_arguments(session, function_command_desc, arguments, parameters, &_args))
+        auto _args = cast(ArgTuple*)buffer;
+        // Argument conversion can leave owned values in the tuple even when a later field fails.
+        static if (__traits(hasMember, ArgTuple, "__xdtor"))
+            scope (exit) destroy!false(*_args);
+        if (!ready)
             return null;
         alias Parent = __traits(parent, fun);
         static if (is(Parent == struct))
@@ -116,6 +141,8 @@ template function_command_desc(alias fun, string command_name = null)
     private alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
     private alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
     private alias ArgTuple = Tuple!Params;
+    static if (Params.length > 0 && !__traits(isZeroInit, ArgTuple))
+        private static immutable ArgTuple args_init;
 
     private enum size_t ArgCount = () {
         size_t n = 0;
@@ -172,12 +199,19 @@ template function_command_desc(alias fun, string command_name = null)
 
     private enum Name = command_name is null ? FunctionName : command_name;
 
-    private CommandDesc build_desc() pure
+    private FunctionCommandDesc build_desc() pure
     {
-        CommandDesc d;
-        d.cls = &function_command_class;
-        d.name = StringLit!Name;
+        FunctionCommandDesc d;
+        d.command.cls = &function_command_class;
+        d.command.name = StringLit!Name;
         d.fn = &function_adapter;
+        static if (Params.length > 0)
+        {
+            static assert(ArgTuple.sizeof <= ushort.max && ArgTuple.alignof <= 8);
+            d.args_size = cast(ushort)ArgTuple.sizeof;
+            static if (!__traits(isZeroInit, ArgTuple))
+                d.args_init = &args_init;
+        }
         static if (ArgCount > 0)
             d.args = function_args[];
         static foreach (j; 0 .. ParamNames.length)
@@ -201,7 +235,10 @@ template function_command_desc(alias fun, string command_name = null)
         return d;
     }
 
-    static immutable CommandDesc function_command_desc = build_desc();
+    private static immutable FunctionCommandDesc desc = build_desc();
+
+    @property static ref immutable(CommandDesc) function_command_desc()
+        => desc.command;
 }
 
 
@@ -216,7 +253,10 @@ static immutable CommandClass function_command_class = {
 CommandState function_command_exec(ref Command cmd, Session session, Scope*, const Variant[] args, const NamedArgument[] named_args, out Variant result)
 {
     CommandState state;
-    const(char)[] r = cmd.desc.fn(session, state, args, named_args, cmd.instance);
+    ref desc = function_desc(cmd);
+    void* buffer = alloca(desc.args_size);
+    bool ready = marshal_command_arguments(session, desc, args, named_args, buffer);
+    const(char)[] r = desc.fn(session, state, buffer, cmd.instance, ready);
 
     // TODO: when a function returns a token, it might be fed into the calling context?
     assert(!(state && r), "Shouldn't return a latent state AND a result...");
@@ -249,8 +289,8 @@ MutableString!0 function_command_complete(ref Command cmd, ref Console console, 
         size_t equals = lastTok.findFirst('=');
         if (equals == lastTok.length)
         {
-            tokens = suggest_args(*cmd.desc, lastTok);
-            if (immutable(FunctionArgument)* a = positional_arg(*cmd.desc, cmd_line[0 .. lastToken]))
+            tokens = suggest_args(function_desc(cmd), lastTok);
+            if (immutable(FunctionArgument)* a = positional_arg(function_desc(cmd), cmd_line[0 .. lastToken]))
             {
                 if (a.suggest)
                 {
@@ -264,14 +304,14 @@ MutableString!0 function_command_complete(ref Command cmd, ref Console console, 
                 if (result[$-1] == ' ')
                 {
                     result.popBack();
-                    tokens = suggest_values(*cmd.desc, result[0 .. $-1], null);
+                    tokens = suggest_values(function_desc(cmd), result[0 .. $-1], null);
                     result ~= get_completion_suffix(null, tokens);
                 }
             }
             return result;
         }
 
-        tokens = suggest_values(*cmd.desc, lastTok[0 .. equals], lastTok[equals + 1 .. $]);
+        tokens = suggest_values(function_desc(cmd), lastTok[0 .. equals], lastTok[equals + 1 .. $]);
         result ~= get_completion_suffix(lastTok[equals + 1 .. $], tokens);
         return result;
     }
@@ -293,8 +333,8 @@ Array!String function_command_suggest(ref Command cmd, ref Console console, cons
     size_t equals = lastTok.findFirst('=');
     if (equals == lastTok.length)
     {
-        Array!String suggestions = suggest_args(*cmd.desc, lastTok);
-        if (immutable(FunctionArgument)* a = positional_arg(*cmd.desc, cmd_line[0 .. lastToken]))
+        Array!String suggestions = suggest_args(function_desc(cmd), lastTok);
+        if (immutable(FunctionArgument)* a = positional_arg(function_desc(cmd), cmd_line[0 .. lastToken]))
         {
             if (a.suggest)
             {
@@ -304,14 +344,14 @@ Array!String function_command_suggest(ref Command cmd, ref Console console, cons
         }
         return suggestions;
     }
-    return suggest_values(*cmd.desc, lastTok[0 .. equals], lastTok[equals + 1 .. $]);
+    return suggest_values(function_desc(cmd), lastTok[0 .. equals], lastTok[equals + 1 .. $]);
 }
 
 version (ExcludeHelpText) {} else
 const(char)[] function_command_help(ref const Command cmd, const(char)[] args)
 {
     auto buf = MutableString!0(Concat, "Usage: ", cmd.desc.name[]);
-    foreach (ref a; cmd.desc.args)
+    foreach (ref a; function_desc(cmd).args)
     {
         buf ~= "\n  ";
         const(char)[] tn = a.type_name[];
@@ -331,7 +371,7 @@ const(char)[] function_command_help(ref const Command cmd, const(char)[] args)
 
 private:
 
-Array!String suggest_args(ref immutable CommandDesc desc, const(char)[] arg_prefix)
+Array!String suggest_args(ref immutable FunctionCommandDesc desc, const(char)[] arg_prefix)
 {
     Array!String suggestions;
     if (desc.custom_suggest !is null)
@@ -348,7 +388,7 @@ Array!String suggest_args(ref immutable CommandDesc desc, const(char)[] arg_pref
 // positional completion resolves through the same per-argument suggester. The
 // arguments are parsed rather than split on whitespace, so a quoted or braced
 // value containing spaces or '=' still counts as the single argument it is.
-immutable(FunctionArgument)* positional_arg(ref immutable CommandDesc desc, const(char)[] preceding)
+immutable(FunctionArgument)* positional_arg(ref immutable FunctionCommandDesc desc, const(char)[] preceding)
 {
     ScriptCommand c;
     scope(exit) free_script_command(c);
@@ -375,7 +415,7 @@ immutable(FunctionArgument)* positional_arg(ref immutable CommandDesc desc, cons
     return null;
 }
 
-Array!String suggest_values(ref immutable CommandDesc desc, const(char)[] argument, const(char)[] value)
+Array!String suggest_values(ref immutable FunctionCommandDesc desc, const(char)[] argument, const(char)[] value)
 {
     if (desc.custom_suggest !is null)
     {
@@ -408,15 +448,22 @@ const(char)[] convert_argument(T)(ref const Variant v, void* arg)
 }
 
 pragma(inline, false)
-private bool marshal_command_arguments(Session session, ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] params, void* buffer)
+private bool marshal_command_arguments(Session session, ref immutable FunctionCommandDesc desc, const Variant[] args, const NamedArgument[] params, void* buffer)
 {
+    if (desc.args_size)
+    {
+        if (desc.args_init)
+            memcpy(buffer, desc.args_init, desc.args_size);
+        else
+            memset(buffer, 0, desc.args_size);
+    }
     const(char)[] error = marshal_arguments(desc, args, params, buffer);
     if (error)
         session.write_line(error);
     return !error;
 }
 
-const(char)[] marshal_arguments(ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] parameters, void* buffer)
+private const(char)[] marshal_arguments(ref immutable FunctionCommandDesc desc, const Variant[] args, const NamedArgument[] parameters, void* buffer)
 {
     ubyte* base = cast(ubyte*)buffer;
     const bool has_args_param = desc.args_offset != ushort.max;
