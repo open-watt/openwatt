@@ -1096,10 +1096,11 @@ nothrow @nogc:
                 }
                 if (bad_frame)
                     break;
+                immutable bool live = json.getMember("seq") is null;
                 for (size_t i = 0; i < smp.length(); ++i)
                 {
                     ref Variant pair = (*smp)[i];
-                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong());
+                    sync.inbound_val(peer, h, pair[1], pair[0].asUlong(), live);
                 }
                 break;
             }

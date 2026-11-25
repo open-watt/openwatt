@@ -69,6 +69,12 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-25 | c5c2e70b | ldc 1.43.0 | 3,878,352 | 153,592 | - | #932 matched current-master control |
+| 2026-11-25 | 41f16696 | ldc 1.43.0 | 3,879,380 | 153,592 | - | #932 before minimisation; +1,028 B vs c5c2e70b, RAM flat |
+| 2026-11-25 | #932 admission cleanup (ccba9998) | ldc 1.43.0 | 3,878,996 | 153,592 | - | fixed BUILD_ID=41f16696043c; -384 B vs 41f16696, +644 B vs c5c2e70b, RAM flat |
+| 2026-11-25 | #932 String operator (4f11a11e) | ldc 1.43.0 | 3,879,028 | 153,592 | - | fixed BUILD_ID=41f16696043c; +32 B code vs ccba9998 for -64 B M0 image, RAM flat |
+| 2026-11-25 | #932 ownership query (8ab03608) | ldc 1.43.0 | 3,878,900 | 153,592 | - | fixed BUILD_ID=41f16696043c; actual-device lookup, -128 B vs 4f11a11e, RAM flat |
+| 2026-11-25 | #932 final (d5822ae2) | ldc 1.43.0 | 3,878,856 | 153,592 | - | fixed BUILD_ID=41f16696043c; bounds subsume sentinel, -44 B vs 8ab03608; -524 B vs approved 41f16696, +504 B vs c5c2e70b, RAM flat |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -97,6 +103,10 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-04 | #869 | ldc 1.43.0 | 5,851,368 | 534,920 | | RDP sessions on #870; deployed to the Pi (slot 212), sync peered with F993 over `/interface/udp reliable=yes` |
 | 2026-11-05 | ow/zigbee-attach-assert | ldc 1.43.0 | 5,835,512 | 534,920 | | master 868ba79b9 (#870) with the coordinator dropping its node ID on shutdown; deployed to the Pi (slot 213), five restarts without the attach_node assert |
 | 2026-11-06 | ow/zbdongle-no-flow | ldc 1.43.0 | 5,831,112 | 534,920 | | urt #396 (DTR asserted with flow control `none`) on master b623e6fda; deployed to the Pi (slot 218) with the ZBDongle-E on `flow-control=none`, four restarts with no ASH error |
+| 2026-11-24 | 0227dabf | ldc 1.43.0 | 5,804,584 | 534,704 | - | deployed fleet-926-932-0227dabf; master c5c2e70b + #926/#932, urt c478; Pi slot 222 good, fail 0 |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 5,810,336 | 534,672 | - | deployed master-only reboot control, BUILD_ID=fleet-master-c5c2e70b; Pi slot 223 good, fail 0 |
+| 2026-11-24 | 8c638829 | ldc 1.43.0 | 5,787,576 | 534,672 | - | deployed master + #932 reboot control, BUILD_ID=fleet-932-8c638829; Pi slot 224 good, fail 0 |
+| 2026-11-24 | 418262ee | ldc 1.43.0 | 5,806,848 | 534,688 | - | deployed master + #926 reboot control, BUILD_ID=fleet-926-418262ee; Pi slot 225 good, fail 0 |
 
 ### ESP32-S3 reference devkit, `make esp-idf-build PLATFORM=esp32-s3 CONFIG=release`
 
@@ -138,6 +148,10 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
 | 2026-11-19 | 89ff4a6e | ldc 1.42.0 | 3,010,784 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; master control row for #915 |
 | 2026-11-19 | ow/sync-rdp | ldc 1.42.0 | 3,004,224 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; #915: sync over RDP, reliability sublayer deleted, one endpoint set for discovery and the sync server, writable on the RDP session timer: -6,560 vs master 89ff4a6e (3,010,784) |
+| 2026-11-24 | 0227dabf | ldc 1.42.0 | 3,004,672 | 141,855 | 4,194,304 | deployed fleet-926-932-0227dabf; IDF 6.1, COREDUMP=1; both members re-adopted; bench reboot recovered after 4m49s setup retries |
+| 2026-11-24 | c5c2e70b | ldc 1.42.0 | 3,001,664 | 141,855 | 4,194,304 | deployed master-only reboot control, BUILD_ID=fleet-master-c5c2e70b; IDF 6.1, COREDUMP=1 |
+| 2026-11-24 | 8c638829 | ldc 1.42.0 | 3,002,528 | 141,855 | 4,194,304 | deployed master + #932 reboot control, BUILD_ID=fleet-932-8c638829; IDF 6.1, COREDUMP=1 |
+| 2026-11-24 | 418262ee | ldc 1.42.0 | 3,003,792 | 141,855 | 4,194,304 | deployed master + #926 reboot control, BUILD_ID=fleet-926-418262ee; IDF 6.1, COREDUMP=1 |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -272,6 +286,19 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-08 | ow/sync-mirror-offline | ldc 1.43.0 | 2,659,848 | 186,242 | 4,190,208 | D0 1,016,257 flash, 88,128 ram; a mirror's status.online is its binding session's live vote: +896 M0, +332 D0 against #915 (605940284), no ram |
+
+### BL808 M0 only, `make PLATFORM=bl808 CONFIG=release D0=0`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | c5c2e70b | ldc 1.43.0 | 2,656,008 | 186,242 | 4,190,208 | current-master control, M0 image without D0 payload; BUILD_ID=unknown |
+| 2026-11-25 | 41f16696 | ldc 1.43.0 | 2,656,904 | 186,242 | 4,190,208 | #932 before minimisation; +896 B vs c5c2e70b, RAM flat; BUILD_ID=unknown |
+| 2026-11-25 | #932 state cleanup (61964116) | ldc 1.43.0 | 2,656,840 | 186,242 | 4,190,208 | shared binding lookup and idempotent withdrawal; -64 B vs 41f16696, +832 B vs c5c2e70b, RAM flat; BUILD_ID=unknown |
+| 2026-11-25 | #932 admission cleanup (ccba9998) | ldc 1.43.0 | 2,656,840 | 186,242 | 4,190,208 | shared timestamp admission and strict bool predicate; -28 B code vs 61964116, image alignment absorbs savings; BUILD_ID=unknown |
+| 2026-11-25 | #932 String operator (4f11a11e) | ldc 1.43.0 | 2,656,776 | 186,242 | 4,190,208 | existing equality helper; -64 B image vs ccba9998, +768 B vs c5c2e70b, RAM flat; BUILD_ID=unknown |
+| 2026-11-25 | #932 ownership query (8ab03608) | ldc 1.43.0 | 2,656,776 | 186,242 | 4,190,208 | actual-device lookup; +2 B code vs 4f11a11e, image flat; BUILD_ID=unknown |
+| 2026-11-25 | #932 final (d5822ae2) | ldc 1.43.0 | 2,656,776 | 186,242 | 4,190,208 | bounds subsume sentinel; -8 B code vs 8ab03608, image flat; -128 B vs approved 41f16696, +768 B vs c5c2e70b, RAM flat; BUILD_ID=unknown |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 

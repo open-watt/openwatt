@@ -1,6 +1,6 @@
 # Lossless, untorn sync streams
 
-Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) and B2a in review. Delete this file when phase C lands; reconcile what remains
+Status: phase A (#852), B1a (#855) and the series corrections B1b needed (#862) landed; B1b (#857) and B2a (#865) landed. Delete this file when phase C lands; reconcile what remains
 into [TODO.md](../../TODO.md).
 
 ## Problem

@@ -3,6 +3,11 @@
 Client-visible changes land here as dated task sections; UX clients (sync consumers) work
 through them and remove sections as they are absorbed.
 
+## 2026-11-08: mirrored devices go offline when their peer's session ends
+
+- A mirrored device's `status.online` goes false when its peer's session ends (#925); its values keep
+  their last value and time, so views that show them as current gate on `status.online`.
+
 ## 2026-11-07: display newly bound scalar sensors as awaiting data
 
 Bindings can announce elements and their formats before the first sample.

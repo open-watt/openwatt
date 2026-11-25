@@ -1,5 +1,10 @@
 # TODO
 
+- Give the online-vote API a typed source handle, confining any unavoidable reinterpretation to one helper so callers never cast to void*.
+- Apply OTA supervisor policy when runtime `watchdog`, `commit-time` or `max-fail` changes; setters currently store values, but `ota_push_policy` runs only at startup.
+- Retest `/device/print --json` over sync with allocator checking: the 2026-08-19 claim-stall investigation reported heap corruption; subsequent console rewrites mean current reproduction is unverified.
+- Retest an unresponsive EZSP NCP while monitoring main-loop heartbeat: the 2026-08-19 investigation observed ASH retransmits before watchdog kills; intervening RX/retransmit changes leave current reproduction unverified.
+
 - **CI is held off release compilers by dlang/dmd#23605**: on 32-bit x86, a D-declared subclass of
   an `extern(C++)` root gets its generated `__aggrDtor` with D linkage while the virtual call uses
   the C++ convention, so the destructor receives the vtbl pointer as `this` (fixed by #23606 in
