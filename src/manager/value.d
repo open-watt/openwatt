@@ -530,39 +530,18 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (!v.isString)
         return "Invalid value";
 
-    const(char)[] name = v.asString;
-    const(char)[] tail = name;
-    const(char)[] type = tail.split!':';
-
     static if (is(typeof(Type.type_name)))
     {
-        // concrete collection type - `type:` prefix is optional; if given, must be T or a descendant
-        if (!tail.empty)
-        {
-            auto rt = type in g_app.types;
-            if (!rt)
-                return tconcat("Unknown type: ", type);
-            if (!type_matches(collection_type_info!Type(), rt.type_info))
-                return tconcat("expected " ~ Type.type_name ~ " (or descendant), got ", type);
-            name = tail;
-        }
-
-        r = Collection!Type().get(name);
-        if (r is null)
-        {
-            // check if name exists in root collection but is wrong subtype
-            alias Root = CollectionRoot!Type;
-            static if (!is(Type == Root))
-            {
-                if (auto item = Collection!Root().get(name))
-                    return tconcat("expected " ~ Type.type_name ~ ", but '", name, "' is a ", item.type[]);
-            }
-            return tconcat("Item does not exist: ", name);
-        }
-        return null;
+        BaseObject item;
+        const(char)[] error = resolve_collection_item(v.asString, collection_type_info!Type(),
+            collection_type_info!(CollectionRoot!Type)(), item);
+        r = cast(Type)cast(void*)item;
+        return error;
     }
     else
     {
+        const(char)[] tail = v.asString;
+        const(char)[] type = tail.split!':';
         // abstract (BaseObject, ActiveObject, ...) - `type:` prefix is required
         if (type.empty || tail.empty)
             return "Expected `type:name`";
@@ -583,6 +562,33 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
             return tconcat("expected " ~ Type.stringof ~ ", got ", type);
         return null;
     }
+}
+
+private const(char)[] resolve_collection_item(const(char)[] name, const(CollectionTypeInfo)* expected,
+    const(CollectionTypeInfo)* root, out BaseObject item)
+{
+    const(char)[] tail = name;
+    const(char)[] type = tail.split!':';
+    if (!tail.empty)
+    {
+        auto rt = type in g_app.types;
+        if (!rt)
+            return tconcat("Unknown type: ", type);
+        if (!type_matches(expected, rt.type_info))
+            return tconcat("expected ", expected.type[], " (or descendant), got ", type);
+        name = tail;
+    }
+
+    auto id = expected.collection_id;
+    BaseObject found = item_table(id).get_by_name(name, id);
+    if (found && type_matches(expected, found._typeInfo))
+    {
+        item = found;
+        return null;
+    }
+    if (found && expected !is root && type_matches(root, found._typeInfo))
+        return tconcat("expected ", expected.type[], ", but '", name, "' is a ", found.type[]);
+    return tconcat("Item does not exist: ", name);
 }
 
 const(char[]) from_variant(ref const Variant v, out Component r) nothrow @nogc
