@@ -34,10 +34,10 @@ make PLATFORM=k210                     # K210 RISC-V microcontroller
 make ARCH=arm64 OS=linux               # Generic ARM64 Linux build
 make ARCH=riscv64                      # Generic RISC-V 64-bit build
 
-# Feature-tier builds
-make FEATURES=switch                   # L2 packet-fabric only, no IP/protocols/apps
-make FEATURES=full                     # Default: full standalone instance
-make HEADLESS=1                        # Embedded role: no human shell/web; gates CLI help, prompts, banners
+# Module selection
+make explain-modules                   # Print the selected modules and why each is in
+make MODULES="l2 ip dhcp_client"       # Replace the default set (here: L2 fabric plus IPv4 node)
+make WITH=sfp WITHOUT="shell rdp"      # Add to and remove from the default set
 make PLATFORM=bl808                    # BL808: M0 (the network node) with D0 appended; D0=0 leaves D0 out
 
 # Testing
@@ -51,12 +51,8 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `PLATFORM`: Auto-detected from host if unspecified. Values: `windows`, `linux`, `routeros`, embedded targets (`esp32`, `k210`, `cortex-a7`, etc.)
 - `ARCH`: Target architecture (`x86_64`, `arm64`, `riscv64`, etc.) - auto-detected or set by PLATFORM
 - `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
-- `FEATURES`: `switch` (L2 fabric only) or `full` (default; protocols+apps+devices+tools). `minimal` is deferred. See [features.mk](features.mk).
-- `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances.
-- `IPV6`: `1` (default) or `0`. `IPV6=0` drops the IPv6 side of the in-tree IP stack and its address, route, and pool collections.
-- `GATEWAY`: `1` (default) or `0`. `GATEWAY=0` disables transit forwarding and DHCP server/lease objects while retaining clients and diagnostics; TINY targets default to `0`.
-- `RDP`: `1` (default) or `0`. `RDP=0` drops reliable UDP (`rdp_open`, `/interface/udp reliable=`) and with it sync over UDP.
-- `SFP`: `0` or `1`. Builds the SFP cage and `/interface/sfp`. Defaults to `1` on Windows, Linux and unittest builds, `0` on embedded targets, where a board with a cage sets it in its `board.mk`.
+- `MODULES`, `WITH`, `WITHOUT`: module selection, command line only. [modules.mk](modules.mk) is the registry: each module's requires are closed over, and `WITHOUT` of a module that a selected module requires is an error naming the chain. `MODULES` replaces the default set, `WITH` adds to it, `WITHOUT` removes from it. Until the code is boxed per module, a set builds as the smallest legacy tier that compiles it; `explain-modules` prints both.
+- Legacy selection (`FEATURES`, `HEADLESS`, `MODBUS`, `HTTP_CLIENT`, `HTTP_FILESERVER`, `IPV6`, `GATEWAY`, `RDP`, `SFP`): still the default set's source, set by platforms and `board.mk`; deprecated on the command line. `GATEWAY=0` removes `ip_forward`, `ipv6_ra` and `dhcp_server`, and TINY targets default to it. `SFP` defaults to `1` on Windows, Linux and unittest builds. See [features.mk](features.mk).
 - `TINY`: `0`/`1`, set by [third_party/urt/platforms.mk](third_party/urt/platforms.mk) for <~350KB-RAM / <2MB-flash targets. Forces `-Oz` under LDC, strips verbose strings, drops heavy helpers.
 
 **Output directories:**

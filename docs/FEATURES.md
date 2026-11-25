@@ -10,7 +10,7 @@ from the [README](../README.md); outstanding work is in [TODO.md](../TODO.md).
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Runtime console configuration | Working | Everything is created and configured through console commands; `startup.conf` is a script, not a config file. Local, telnet, and over the sync channel. |
-| Modular architecture | Working | Modules register collections and commands at build time; a module that is not compiled in contributes nothing, so features gate themselves. Build tiers `switch`, `switch-ip`, `switch-http`, `switch-https`, `full`, plus `HEADLESS` and `TINY` axes. |
+| Modular architecture | Working | Modules register collections and commands at build time; a module that is not compiled in contributes nothing, so features gate themselves. Builds select modules (`MODULES`, `WITH`, `WITHOUT`, `make explain-modules`) from a registry with inferred requires; until each module is boxed, a selection compiles as the smallest of the tiers `switch`, `switch-ip`, `switch-http`, `switch-https`, `full`. |
 | Custom runtime (uRT) | Working | `@nogc nothrow` throughout; no Phobos, no druntime, no exceptions. One tree builds desktop and microcontroller targets. |
 | Event-driven core | Working | Reactor-driven I/O on every platform; no polling. Timers, completion callbacks and state signals drive all work. |
 | Data model | Working | Device, component and element tree with a typed, timestamped series behind every element. See [DATA_MODEL.md](DATA_MODEL.md). |
@@ -47,7 +47,7 @@ from the [README](../README.md); outstanding work is in [TODO.md](../TODO.md).
 | Bridge, VLAN, interface groups | Working | L2 bridging with an address table, 802.1Q VLANs with priority flow, interface groups. |
 | 802.1ag CFM | Working | Unicast loopback ping against third-party gear and a broadcast discovery sweep of OpenWatt stations. |
 | UDP packet interface | Working | Unicast and multi-drop, over IP or a bare MAC (`[mac]:port`), so IP-less builds carry sync and discovery. |
-| IP stack (IPv4 and IPv6) | Working | In-tree stack: addresses, routes, ARP and ND, ICMP and ICMPv6, IGMP and MLD membership, address pools, firewall, transit forwarding (`GATEWAY=1`), Linux mirroring. `IPV6=0` builds without the v6 half. |
+| IP stack (IPv4 and IPv6) | Working | In-tree stack: addresses, routes, ARP and ND, ICMP and ICMPv6, IGMP and MLD membership, address pools, firewall, transit forwarding (`ip_forward`), Linux mirroring. `WITHOUT=inet6` builds without the v6 half. |
 | TCP and UDP streams | Working | Client and server endpoints on the in-tree stack. |
 | DHCP | Working | IPv4 client and server with a lease store. DHCPv6 message codec is built; the v6 client and server are WIP. |
 | DNS | Alpha | Listeners and message codec on master; the server, resolver, cache and DNS-over-HTTPS endpoint are built on the `ow/dns` branch, unmerged. |

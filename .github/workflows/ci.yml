@@ -86,6 +86,11 @@ jobs:
         shell: bash
         run: python test/test_build_stamps.py ARCH=x86_64 OS=${{ matrix.os }}
 
+      - name: Test module selection
+        if: ${{ matrix.arch == 'x86_64' && matrix.compiler == 'dmd' }}
+        shell: bash
+        run: python test/test_modules.py ARCH=x86_64 OS=${{ matrix.os }}
+
       - name: Upload release binary
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' && matrix.compiler == 'ldc' }}
         uses: actions/upload-artifact@v4

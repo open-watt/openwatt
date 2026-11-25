@@ -1515,7 +1515,7 @@ statically. The advertisement is applied to the advertising link exactly as a
 received one would be: the prefix becomes a dynamic on-link `route6` and the
 node's own prefix+EUI-64 becomes a dynamic `/128` `address6` after DAD, both
 refreshed by every advertisement sent. Only built with the in-tree IP stack
-and `GATEWAY=1`; on desktop hosts the kernel owns the router role.
+and the `ipv6_ra` module; on desktop hosts the kernel owns the router role.
 
 | Property | Values | Default | Description |
 | --- | --- | --- | --- |
@@ -1853,7 +1853,7 @@ A sync listener owns one RDP endpoint per selected local endpoint. It spawns a
 dynamic `/sync/peer` for each RDP session a remote opens, and destroys it when
 the session closes; an idle session probes its peer, so one that vanishes closes
 it. A remote that
-restarts opens a new session and gets a new peer. Builds without RDP (`RDP=0`)
+restarts opens a new session and gets a new peer. Builds without RDP (`WITHOUT=rdp`)
 have no UDP server.
 
 Every UDP discovery domain creates one dynamic, temporary server as its
