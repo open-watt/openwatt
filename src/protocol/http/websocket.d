@@ -77,7 +77,7 @@ nothrow @nogc:
     {
         super(collection_type_info!WebSocket, id, flags);
         _mtu = ushort.max;  // a message carries whatever a producer hands it
-        _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered;   // TCP-backed: consumers needn't supply either
+        _caps |= InterfaceCaps.reliable | InterfaceCaps.ordered | InterfaceCaps.dedicated;   // TCP-backed, and the URI picked the service
         mark_set!(typeof(this), "caps")();
     }
 

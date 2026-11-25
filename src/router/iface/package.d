@@ -72,6 +72,7 @@ enum PacketDirection : ubyte
     ordered  = 1 << 2, // frames are delivered in transmit order
     hw_timestamp = 1 << 3, // creation_time of a received packet is when the MAC saw it, not when software did
     tx_checksum = 1 << 4, // the MAC completes a TCP or UDP checksum left pending
+    dedicated = 1 << 5, // one service owns the point-to-point link
 }
 
 enum MessageState
@@ -782,6 +783,12 @@ protected:
         if (_flags & ObjectFlags.slave)
         {
             add_rx_frame(packet.length);
+            // raw and udp frames carry no L2 address for a master to switch, so they terminate here
+            if (packet.type == PacketType.raw || packet.type == PacketType.udp)
+            {
+                fire_subscribers(packet);
+                return deliver_local(packet);
+            }
             if (!_master_running)
                 return drop(packet);
             BaseInterface master = _master;
@@ -861,6 +868,11 @@ protected:
             return drop(packet);
         }
 
+        deliver_local(packet);
+    }
+
+    final void deliver_local(Packet* packet)
+    {
         if (auto handler = _frame_handlers[packet.type])
             handler(packet, this);
         else
@@ -1259,6 +1271,9 @@ nothrow @nogc:
         version (UseInternalIPStack) {}
         else
             register_frame_handler(PacketType.ethernet, &on_ethernet_frame);
+        register_frame_handler(PacketType.raw, &on_link_frame);
+        register_frame_handler(PacketType.udp, &on_link_frame);
+        register_object_state_handler(&on_link_state);
 
         g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!UDPInterface();
@@ -1278,6 +1293,9 @@ nothrow @nogc:
         version (UseInternalIPStack) {}
         else
             unregister_frame_handler(PacketType.ethernet);
+        unregister_frame_handler(PacketType.raw);
+        unregister_frame_handler(PacketType.udp);
+        unregister_object_state_handler(&on_link_state);
 
         close_udp_endpoints();
         register_inet_scope_provider(null);
@@ -1736,6 +1754,16 @@ nothrow @nogc:
 +/
 
 private:
+    void on_link_frame(Packet* packet, BaseInterface iface)
+    {
+        link_input(packet, iface);
+    }
+
+    void on_link_state(ActiveObject object, StateSignal signal)
+    {
+        link_state_change(object, signal);
+    }
+
     void on_ethernet_frame(Packet* packet, BaseInterface iface)
     {
         if (packet.eth.ether_type == EtherType.ow)

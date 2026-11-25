@@ -145,9 +145,14 @@ private:
         }
         peer.transport(ws);
         peer.encoder(_encoder);
-        peer.subscribe_transport();
         peer.subscribe(&on_peer_state);
         _peers ~= peer;
+        if (!peer.open_link())
+        {
+            log.warning("cannot bind sync on connection ", peer.name[], "; dropping it");
+            peer.disabled(true);   // reaped with its socket by the sweep
+            return;
+        }
 
         debug log.info("client connected -> ", peer.name[]);
     }

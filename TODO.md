@@ -1183,6 +1183,21 @@ role from a concrete deployment need before implementing or advertising it.
 
 ## Sync and peering
 
+- **Link ports** (#926, #887): a link UDP endpoint binds only a `dedicated` link; a port layer comes back when the first non-dedicated multi-service link needs it.
+
+- **Link endpoint follow-ups** (2026-11-25, #926 review):
+  - `UDPEndpoint.text()` stores a per-send choice on the endpoint; a send that forgets `text(false)`
+    sends binary as WebSocket text. Make it a send argument.
+  - `SyncPeer.transport_ready` reads the same-name successor through `_transport`, not the instance
+    `_udp` is bound to; latent while every caller is gated on `running`.
+  - `SyncPeer.control_room` and `arm_tx` dereference `_udp` unchecked, relying on "running implies
+    `_udp`"; state it with a `debug assert`.
+  - A slaved interface now terminates every raw and udp frame locally; say so in the bridge and
+    master section of docs/CLI.md.
+  - `PeerFlags` bit 0 is unused; XRAM `tx_commit` has one caller and could be private.
+  - `UDPInterface` changes `caps` without `mark_set` (the `reliable` setter, startup, shutdown), so a
+    client mirroring `caps` misses `dedicated`, `reliable` and `ordered` coming and going.
+
 - **RDP allocation-failure coverage**: session, frame and held-frame allocations fail soft (a send is
   refused, a frame cut retries on the session timer, an early frame is dropped for retransmission), but no test injects a
   failure; add it once the fixture can fail an allocation on demand.
@@ -2099,9 +2114,9 @@ so D0's devices appear on M0 only.
 - **Packets between the cores ride sync**: D0 reaches the network through M0 by a sync frame kind
   carrying packets, on the one raw XRAM channel, as `/interface/tunnel` in
   [TAPS_AND_TUNNELS.draft.md](docs/TAPS_AND_TUNNELS.draft.md); no Ethernet channel over XRAM.
-- **Sync copies each frame into XRAM**: `/interface/xram` offers `tx_reserve`/`tx_commit`, so the
-  sync encoders could build a frame where D0 or M0 reads it. Worth it once the M0/D0 link carries
-  bulk traffic.
+- **Sync copies each frame into XRAM**: a reserve/commit pair on `/interface/xram`, over the uRT
+  XRAM ring's own, would let the sync encoders build a frame where D0 or M0 reads it. Worth it once
+  the M0/D0 link carries bulk traffic.
 - **A doorbell event the full event queue refuses waits for the next heartbeat**, up to a second.
 - **The heap core keeps a pool it failed to add**: reject it so its bytes are not counted as free.
 - **The BL618 has no `system_reset`/`por_reset`**; only the BL808 cores do.

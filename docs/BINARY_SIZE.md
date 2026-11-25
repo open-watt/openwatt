@@ -72,6 +72,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-25 | 096172ce | ldc 1.43.0 | 3,807,328 | 153,592 | - | #989 matched control, BUILD_ID=module-index-matched, urt a448e54 |
 | 2026-11-25 | #989 | ldc 1.43.0 | 3,805,064 | 153,528 | - | -2,264 B / -64 B RAM vs 096172ce; indexed module lookup, two-phase bounded drain, module pre_deinit/deinit pairs |
 | 2026-11-25 | #988 | ldc 1.43.0 | 3,739,952 | 153,528 | - | Windows native-IP receive storage on demand; -65,112 B vs #989 23836c8d, static RAM flat; endpoint heap 65,880 -> 136 B, a native-IP endpoint and its operation +8 B |
+| 2026-11-25 | #926 | ldc 1.43.0 | 3,739,196 | 153,528 | - | -756 B vs #988 34943bdf, RAM flat; link endpoints on dedicated links, sync off its interface subscription |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -143,6 +144,8 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
 | 2026-11-19 | 89ff4a6e | ldc 1.42.0 | 3,010,784 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; master control row for #915 |
 | 2026-11-19 | ow/sync-rdp | ldc 1.42.0 | 3,004,224 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; #915: sync over RDP, reliability sublayer deleted, one endpoint set for discovery and the sync server, writable on the RDP session timer: -6,560 vs master 89ff4a6e (3,010,784) |
+| 2026-11-25 | #988 34943bdf | ldc 1.42.0 / IDF 6.1 | 2,948,528 | 138,491 | 4,194,304 | #926 matched control, BUILD_ID=module-index-matched, urt a448e54 |
+| 2026-11-25 | #926 | ldc 1.42.0 / IDF 6.1 | 2,950,464 | 138,491 | 4,194,304 | +1,936 B vs #988 34943bdf, RAM flat |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -275,6 +278,20 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+
+#### BL808 M0 image alone, `make PLATFORM=bl808 PROCESSOR=e907 D0=0 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #988 34943bdf | ldc 1.43.0 | 2,607,176 | 186,250 | 4,190,208 | `m0fw.bin`; #926 matched control, BUILD_ID=module-index-matched, urt a448e54 |
+| 2026-11-25 | #926 | ldc 1.43.0 | 2,609,416 | 186,250 | 4,190,208 | +2,240 B vs #988 34943bdf, RAM flat |
+
+#### BL808 D0 image alone, `make PLATFORM=bl808_d0 CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-25 | #988 34943bdf | ldc 1.42.0 | 1,008,407 | 87,984 | - | packed `d0fw.bin`; #926 matched control, BUILD_ID=module-index-matched, urt a448e54 |
+| 2026-11-25 | #926 | ldc 1.42.0 | 1,009,773 | 87,984 | - | +1,366 B vs #988 34943bdf, RAM flat |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 

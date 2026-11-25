@@ -34,7 +34,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!XramInterface, id, flags);
-        _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered);
+        _caps = cast(InterfaceCaps)(InterfaceCaps.reliable | InterfaceCaps.ordered | InterfaceCaps.dedicated);
         set_l2mtu(cast(ushort)xram_mtu());
     }
 
@@ -53,22 +53,12 @@ nothrow @nogc:
 
     // API
 
-    // A payload of up to max_length bytes to build in XRAM and send with tx_commit; null when the link has no
-    // room, and tx_ready invites again once it does.
-    final void[] tx_reserve(size_t max_length)
-        => link_up ? xram_reserve(_channel, max_length) : null;
-
     final bool tx_commit(size_t length)
     {
         if (!xram_post(_channel, length))
             return false;
         add_tx_frame(length);
         return true;
-    }
-
-    final void tx_abandon()
-    {
-        xram_abandon(_channel);
     }
 
     // Leaves room in the ring for a frame that cannot wait for it.
