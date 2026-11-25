@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 3,878,352 | 153,592 | - | matched #949 master source; fixed BUILD_ID=79b58c6d1c22 |
+| 2026-11-24 | 0049febc | ldc 1.43.0 | 3,878,528 | 153,592 | - | #949 validate negative and recurring zero durations; preserve immediate one-shots; +176 B, RAM flat; same fixed BUILD_ID |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -291,6 +293,13 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 | 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
 | 2026-10-08 | #825 | ldc 1.43.0 | 1,686,272 | 51,100 | 2,097,152 | doorbells; also the first row with the stream and sync series since #800 |
+
+### x86_64 Windows, `make COMPILER=ldc CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | 8a145cbd | ldc 1.43.0 | 3,884,272 | 120,824 | - | matched master baseline |
+| 2026-11-11 | f4f892a5 | ldc 1.43.0 | 3,884,304 | 120,824 | - | positive cron interval admission |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
