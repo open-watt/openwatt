@@ -228,23 +228,8 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     else if (v.isString)
     {
-        import urt.conv : parse_int, parse_uint;
-
-        const(char)[] s = v.asString;
-        int base = 10;
-        if (s.length > 2 && s[0..2] == "0x")
-        {
-            base = 16;
-            s = s[2 .. $];
-        }
-        if (s.length > 2 && s[0..2] == "0b")
-        {
-            base = 2;
-            s = s[2 .. $];
-        }
-        size_t taken;
-        long i = base != 10 ? cast(long)s.parse_uint(&taken, base) : s.parse_int(&taken);
-        if (taken != s.length)
+        long i;
+        if (!parse_integer_token(v.asString, i))
             return "Invalid integer value";
         if ((long.max > T.max && i > T.max) || (long.min < T.min && i < T.min))
             return "Integer value out of range";
@@ -253,6 +238,27 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     else
         return "Invalid integer value";
     return null;
+}
+
+pragma(inline, false)
+private bool parse_integer_token(const(char)[] s, out long value)
+{
+    import urt.conv : parse_int, parse_uint;
+
+    int base = 10;
+    if (s.length > 2 && s[0..2] == "0x")
+    {
+        base = 16;
+        s = s[2 .. $];
+    }
+    if (s.length > 2 && s[0..2] == "0b")
+    {
+        base = 2;
+        s = s[2 .. $];
+    }
+    size_t taken;
+    value = base != 10 ? cast(long)s.parse_uint(&taken, base) : s.parse_int(&taken);
+    return taken == s.length;
 }
 
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc

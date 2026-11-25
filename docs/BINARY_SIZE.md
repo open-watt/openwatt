@@ -242,6 +242,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,540,724 | 46,440 | 4,194,304 | also share property marking |
 | 2026-11-25 | 1102ee0f | ldc 1.43.0 | 1,540,788 | 46,448 | 4,194,304 | matched control for the boxed Variant lookup |
 | 2026-11-25 | #990 / urt a448e54 | ldc 1.43.0 | 1,535,444 | 46,448 | 4,194,304 | shared boxed Variant lookup saves 5,344 bytes |
+| 2026-11-25 | 096172ce | ldc 1.43.0 | 1,535,444 | 46,440 | 4,194,304 | matched source order for shared formatter and dispatch follow-up |
+| 2026-11-25 | codex/embedded-code-size-followup / urt 155ed39 | ldc 1.43.0 | 1,516,572 | 46,440 | 4,194,304 | combined follow-up saves 18,872 bytes |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 

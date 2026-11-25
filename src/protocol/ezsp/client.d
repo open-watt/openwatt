@@ -931,23 +931,7 @@ void fail_shim(bool withUserdata, Args...)(void* cb, void* inst, void* user_data
     else static if (Args.length > 0 && is(Args[0] == EzspStatus))
         args[0] = cast(EzspStatus)0xFF;
 
-    if (inst)
-    {
-        void delegate() callback;
-        callback.ptr = inst;
-        callback.funcptr = cast(void function())cb;
-        static if (withUserdata)
-            (cast(void delegate(void*, Args) nothrow @nogc)callback)(user_data, args.expand);
-        else
-            (cast(void delegate(Args) nothrow @nogc)callback)(args.expand);
-    }
-    else
-    {
-        static if (withUserdata)
-            (cast(void function(void*, Args) nothrow @nogc)cb)(user_data, args.expand);
-        else
-            (cast(void function(Args) nothrow @nogc)cb)(args.expand);
-    }
+    invoke_callback!withUserdata(cb, inst, user_data, args.expand);
 }
 
 void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb, void* inst, void* user_data)
@@ -957,36 +941,49 @@ void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb
     Tuple!Args args;
     static if (Args.length > 0)
     {
-        size_t taken = response.ezsp_deserialise(args);
-        if (taken == 0 || taken > response.length)
-        {
-            log_warning("ezsp", "error deserialising response");
+        if (!valid_response_size(response, response.ezsp_deserialise(args)))
             return;
-        }
-        if (taken < response.length)
-        {
-            // TODO: WE SEE THIS WEIRD 02 TAIL BYTE ALL THE TIME IN NORMAL COMMUNICATION!
-            //       WTF IS IT? WHY DO WE SEE IT?
-            if (taken != response.length - 1 || response[$ - 1] != 0x02)
-                log_warning("ezsp", "response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
-        }
     }
 
+    invoke_callback!withUserdata(cb, inst, user_data, args.expand);
+}
+
+pragma(inline, false)
+private bool valid_response_size(const(ubyte)[] response, size_t taken)
+{
+    if (taken == 0 || taken > response.length)
+    {
+        log_warning("ezsp", "error deserialising response");
+        return false;
+    }
+    if (taken < response.length)
+    {
+        // TODO: WE SEE THIS WEIRD 02 TAIL BYTE ALL THE TIME IN NORMAL COMMUNICATION!
+        //       WTF IS IT? WHY DO WE SEE IT?
+        if (taken != response.length - 1 || response[$ - 1] != 0x02)
+            log_warning("ezsp", "response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
+    }
+    return true;
+}
+
+pragma(inline, false)
+private void invoke_callback(bool withUserdata, Args...)(void* cb, void* inst, void* user_data, Args args)
+{
     if (inst)
     {
         void delegate() callback;
         callback.ptr = inst;
         callback.funcptr = cast(void function())cb;
         static if (withUserdata)
-            (cast(void delegate(void*, Args) nothrow @nogc)callback)(user_data, args.expand);
+            (cast(void delegate(void*, Args) nothrow @nogc)callback)(user_data, args);
         else
-            (cast(void delegate(Args) nothrow @nogc)callback)(args.expand);
+            (cast(void delegate(Args) nothrow @nogc)callback)(args);
     }
     else
     {
         static if (withUserdata)
-            (cast(void function(void*, Args) nothrow @nogc)cb)(user_data, args.expand);
+            (cast(void function(void*, Args) nothrow @nogc)cb)(user_data, args);
         else
-            (cast(void function(Args) nothrow @nogc)cb)(args.expand);
+            (cast(void function(Args) nothrow @nogc)cb)(args);
     }
 }
