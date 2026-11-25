@@ -1608,11 +1608,27 @@ Variant SynthGetter(Getters...)(BaseObject item, ref const Property) nothrow @no
     alias Type = __traits(parent, Getter);
     Type instance = cast(Type)cast(void*)item;
 
-    static if (is(ReturnType!(__traits(child, instance, Getter)) == Variant))
+    alias Result = ReturnType!(__traits(child, instance, Getter));
+    alias Value = Unqual!Result;
+    static if (is(Result == Variant))
         return __traits(child, instance, Getter)();
+    else static if (is(Value == byte) || is(Value == short))
+        return box_property_integer!int(__traits(child, instance, Getter)());
+    else static if (is(Value == ubyte) || is(Value == ushort))
+        return box_property_integer!uint(__traits(child, instance, Getter)());
+    else static if (is(Value == int) || is(Value == uint) || is(Value == long) || is(Value == ulong))
+        return box_property_integer!Value(__traits(child, instance, Getter)());
     else
         return to_variant(__traits(child, instance, Getter)());
 }
+
+Variant box_property_integer(T)(T value)
+{
+    version (Tiny)
+        pragma(inline, false);
+    return to_variant(value);
+}
+
 
 StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item, ref const Property) nothrow @nogc
 {
