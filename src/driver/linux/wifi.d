@@ -2271,6 +2271,16 @@ nothrow @nogc:
         g_app.console.register_command!(scan_cmd, "scan")("/interface/wifi", this);
     }
 
+    override void pre_deinit()
+    {
+        _initial_sync_done = true;
+    }
+
+    override void deinit()
+    {
+        unsubscribe_link_changed(&on_link_changed);
+    }
+
     override void update()
     {
         // Defer the first adapter discovery until after startup.conf has run, so

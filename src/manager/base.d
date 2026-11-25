@@ -423,6 +423,9 @@ nothrow @nogc:
     final ObjectLog log() const
         => ObjectLog(this);
 
+    final package bool configured() const pure nothrow @nogc
+        => !(_flags & ObjectFlags.dynamic) && !is_remote;
+
     final bool is_remote() const pure nothrow @nogc
         => _is_remote;
 
@@ -865,6 +868,9 @@ nothrow @nogc:
     final bool running() const pure
         => _state == State.running;
 
+    final bool destroying() const pure
+        => (_state & _destroyed) != 0;
+
     final override ObjectFlags flags() const
     {
         return cast(ObjectFlags)(_flags |
@@ -943,7 +949,12 @@ nothrow @nogc:
 
         _state |= _disabled | _destroyed;
         _state &= ~(_start | _fail);
-        if (was_valid)
+        if (is_remote)
+        {
+            _state = State.destroyed;
+            was_valid = false;
+        }
+        else if (was_valid)
             _state |= _stop;    // -> destroying; state machine will run shutdown then transition to destroyed
         write_status();
 
@@ -1390,6 +1401,11 @@ const(Property*)[] all_properties(Type)()
 void register_object_state_handler(StateSignalHandler handler) nothrow @nogc
 {
     _on_object_state ~= handler;
+}
+
+void unregister_object_state_handler(StateSignalHandler handler) nothrow @nogc
+{
+    _on_object_state.removeFirst(handler);
 }
 
 ushort sync_state_alloc(BaseObject channel) nothrow @nogc

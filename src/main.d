@@ -314,10 +314,9 @@ int main(string[] args)
         }
     }
 
-    while (keep_running)
+    for (MonoTime deadline = getTime(); keep_running; )
     {
-        // handle any expired timers (heartbeat-driven update() lives in here).
-        MonoTime next_deadline = g_app.process_due();
+        deadline = g_app.iterate(deadline);
 
         if (reboot_pending())
             break;
@@ -336,15 +335,12 @@ int main(string[] args)
         else if (!startup_pending && interactive_mode &&
                  (!interactive_session || !interactive_session.attached()))
             break;
-
-        // sleep until either the next timer deadline or an event fires.
-        g_app.wait_for_wake(next_deadline);
-        g_app.process_events();
     }
 
     watchdog_stop();
 
-    shutdown_application();
+    version (Embedded) {} else
+        shutdown_application();
 
     if (reboot_pending())
     {

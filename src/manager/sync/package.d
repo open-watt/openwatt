@@ -56,8 +56,8 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.component : Component;
-import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler;
-import manager.element : Access, Cursor, Element, ElementLifecycleEvent, register_element_lifecycle_handler,
+import manager.device : Device, DeviceBuilder, DeviceLifecycleEvent, register_device_lifecycle_handler, unregister_device_lifecycle_handler;
+import manager.element : Access, Cursor, Element, ElementLifecycleEvent, register_element_lifecycle_handler, unregister_element_lifecycle_handler,
                          sample_from_double, SampleUpdate, Subscriber, sweep_dirty;
 import manager.id : EID;
 import manager.path : Address, match_path, pattern_matches, walk_elements, walk_elements_until;
@@ -186,6 +186,15 @@ nothrow @nogc:
     override void deinit()
     {
         unsubscribe_clock_change(&on_clock_step);
+        unregister_object_lifecycle_handler(&on_object_lifecycle);
+        unregister_object_state_handler(&on_object_state);
+        unregister_element_lifecycle_handler(&on_element_lifecycle);
+        unregister_device_lifecycle_handler(&on_device_lifecycle);
+        g_encoders[] = null;
+        free(g_json_encoder);
+        g_json_encoder = null;
+        free(g_binary_encoder);
+        g_binary_encoder = null;
     }
 
     override void update()

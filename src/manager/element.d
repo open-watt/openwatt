@@ -51,6 +51,11 @@ void register_element_lifecycle_handler(ElementLifecycleHandler handler)
     _on_element_lifecycle ~= handler;
 }
 
+void unregister_element_lifecycle_handler(ElementLifecycleHandler handler)
+{
+    _on_element_lifecycle.removeFirst(handler);
+}
+
 void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
 {
     // writes during a visit re-enlist into a fresh list for the next sweep

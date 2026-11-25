@@ -89,6 +89,11 @@ nothrow @nogc:
         register_device_lifecycle_handler(&on_device_lifecycle);
     }
 
+    override void deinit()
+    {
+        unregister_device_lifecycle_handler(&on_device_lifecycle);
+    }
+
     bool started() const pure
         => _instance !is null;
 

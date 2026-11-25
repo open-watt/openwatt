@@ -2203,6 +2203,12 @@ nothrow @nogc:
 
     override void deinit()
     {
+        version (KernelMirror)
+        {
+            import protocol.ip.linux_mirror : mirror_deinit;
+            mirror_deinit();
+        }
+
         version (UseInternalIPStack)
         {
             set_ether_tcp_input(null);

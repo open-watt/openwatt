@@ -5,6 +5,7 @@ version (Windows):
 import urt.array;
 import urt.atomic : atomicLoad, atomicStore, MemoryOrder;
 import urt.lifetime : move;
+import urt.log : writeError;
 import urt.string;
 import urt.system : sleep;
 import urt.sync.spsc : SPSCRing;
@@ -48,8 +49,9 @@ alias AdapterRing = SPSCRing!(AdapterEvent, 16);
 // spikes 50-100ms on Windows.
 //
 // Threading rules:
-// - scan_sync() runs on the main thread; safe to call ONLY before start().
-// - start() spawns the worker; thereafter only the worker calls scan().
+// - acquire/release and both consumers run on the main thread.
+// - The first acquire scans before starting the sole producer thread.
+// - Only the last release joins the worker and resets its state.
 // - Both rings are SPSC: worker is sole producer, main thread is sole consumer.
 // - Worker must NOT touch any data outside this struct.
 struct AdapterWatcher
@@ -61,36 +63,46 @@ nothrow @nogc:
     AdapterRing ethernet_ring;
     AdapterRing wifi_ring;
 
-    void scan_sync()
+    void acquire()
     {
-        scan();
-    }
-
-    bool start()
-    {
+        if (_owners++ == 0)
+            scan();
         if (_thread !is null)
-            return true;
+            return;
+        version (unittest)
+        {
+            bool create = !_test_fail_start;
+            _test_fail_start = false;
+        }
+        else
+            enum create = true;
         uint tid;
-        _thread = CreateThread(null, 0, &thread_main, &this, 0, &tid);
-        return _thread !is null;
+        if (create)
+            _thread = CreateThread(null, 0, &thread_main, &this, 0, &tid);
+        if (_thread is null)
+            writeError("adapter watcher: failed to start worker");
     }
 
-    // Signal the worker to exit and join it. Must run while the CRT and
-    // NPCap DLL are still alive, hence the crt_destructor below.
-    void stop()
+    void release()
     {
-        if (_thread is null)
+        assert(_owners > 0);
+        if (--_owners != 0)
             return;
-        atomicStore!(MemoryOrder.release)(_stop, true);
-        WaitForSingleObject(_thread, INFINITE);
-        CloseHandle(_thread);
-        _thread = null;
+        stop();
+        reset();
     }
 
 private:
     HANDLE _thread;
     shared bool _stop;
+    uint _owners;
     Array!Entry _last;
+
+    version (unittest)
+    {
+        bool function(ref Array!Entry) nothrow @nogc _test_enumerate;
+        bool _test_fail_start;
+    }
 
     struct Entry
     {
@@ -106,6 +118,24 @@ private:
             => name_buf[0 .. name_len];
         const(char)[] description() return const pure
             => description_buf[0 .. description_len];
+    }
+
+    void stop()
+    {
+        if (_thread is null)
+            return;
+        atomicStore!(MemoryOrder.release)(_stop, true);
+        WaitForSingleObject(_thread, INFINITE);
+        CloseHandle(_thread);
+        _thread = null;
+    }
+
+    void reset()
+    {
+        destroy(_last);
+        ethernet_ring.init();
+        wifi_ring.init();
+        atomicStore!(MemoryOrder.release)(_stop, false);
     }
 
     extern(Windows) static uint thread_main(void* arg) nothrow @nogc
@@ -129,51 +159,19 @@ private:
 
     void scan()
     {
-        if (!npcap_loaded())
-            return;
-
-        pcap_if* interfaces;
-        char[PCAP_ERRBUF_SIZE] errbuf = void;
-        if (pcap_findalldevs(&interfaces, errbuf.ptr) == -1)
-            return;
-        scope(exit) pcap_freealldevs(interfaces);
-
         Array!Entry current;
-        for (auto dev = interfaces; dev; dev = dev.next)
+        bool enumerated;
+        version (unittest)
         {
-            if ((dev.flags & 0x1) != 0)
-                continue;
-            const(char)[] name = dev.name[0 .. dev.name.strlen];
-            const(char)[] desc = dev.description ? dev.description[0 .. dev.description.strlen] : "";
-
-            // Truncate beyond fixed-size buffer; NPF names and Windows descriptions
-            // both fit comfortably in 128 chars in practice.
-            if (name.length > AdapterEvent.NameMax)
-                continue;
-            if (desc.length > AdapterEvent.DescMax)
-                desc = desc[0 .. AdapterEvent.DescMax];
-
-            bool is_virtual = desc.contains_i("virtual") || desc.contains_i("miniport") ||
-                              desc.contains_i("hyper-v") || desc.contains_i("bluetooth") ||
-                              desc.contains_i("wi-fi direct") || desc.contains_i("virtualbox") ||
-                              desc.contains_i("tunnel") || desc.contains_i("offload") ||
-                              desc.contains_i("tap");
-            if (is_virtual)
-                continue;
-
-            bool desc_wifi = desc.contains_i("wireless") || desc.contains_i("wi-fi") || desc.contains_i("wifi");
-            bool flag_wifi = (dev.flags & 0x8) != 0;
-            bool is_wifi = desc_wifi || flag_wifi;
-
-            Entry e;
-            e.name_buf[0 .. name.length] = name[];
-            e.name_len = cast(ubyte)name.length;
-            e.description_buf[0 .. desc.length] = desc[];
-            e.description_len = cast(ubyte)desc.length;
-            e.is_wifi = is_wifi;
-            e.is_ethernet = !is_wifi;
-            current ~= e;
+            if (_test_enumerate)
+                enumerated = _test_enumerate(current);
+            else
+                enumerated = enumerate(current);
         }
+        else
+            enumerated = enumerate(current);
+        if (!enumerated)
+            return;
 
         foreach (ref old; _last[])
         {
@@ -217,6 +215,55 @@ private:
         _last = current.move;
     }
 
+    bool enumerate(ref Array!Entry current)
+    {
+        if (!npcap_loaded())
+            return false;
+
+        pcap_if* interfaces;
+        char[PCAP_ERRBUF_SIZE] errbuf = void;
+        if (pcap_findalldevs(&interfaces, errbuf.ptr) == -1)
+            return false;
+        scope(exit) pcap_freealldevs(interfaces);
+
+        for (auto dev = interfaces; dev; dev = dev.next)
+        {
+            if ((dev.flags & 0x1) != 0)
+                continue;
+            const(char)[] name = dev.name[0 .. dev.name.strlen];
+            const(char)[] desc = dev.description ? dev.description[0 .. dev.description.strlen] : "";
+
+            // Truncate beyond fixed-size buffer; NPF names and Windows descriptions
+            // both fit comfortably in 128 chars in practice.
+            if (name.length > AdapterEvent.NameMax)
+                continue;
+            if (desc.length > AdapterEvent.DescMax)
+                desc = desc[0 .. AdapterEvent.DescMax];
+
+            bool is_virtual = desc.contains_i("virtual") || desc.contains_i("miniport") ||
+                              desc.contains_i("hyper-v") || desc.contains_i("bluetooth") ||
+                              desc.contains_i("wi-fi direct") || desc.contains_i("virtualbox") ||
+                              desc.contains_i("tunnel") || desc.contains_i("offload") ||
+                              desc.contains_i("tap");
+            if (is_virtual)
+                continue;
+
+            bool desc_wifi = desc.contains_i("wireless") || desc.contains_i("wi-fi") || desc.contains_i("wifi");
+            bool flag_wifi = (dev.flags & 0x8) != 0;
+            bool is_wifi = desc_wifi || flag_wifi;
+
+            Entry e;
+            e.name_buf[0 .. name.length] = name[];
+            e.name_len = cast(ubyte)name.length;
+            e.description_buf[0 .. desc.length] = desc[];
+            e.description_len = cast(ubyte)desc.length;
+            e.is_wifi = is_wifi;
+            e.is_ethernet = !is_wifi;
+            current ~= e;
+        }
+        return true;
+    }
+
     static void push_event(ref AdapterRing ring, AdapterEventKind kind, ref const Entry e)
     {
         AdapterEvent[] slot = ring.reserve(1);
@@ -239,4 +286,87 @@ pragma(crt_destructor)
 extern(C) void shutdown_adapter_watcher()
 {
     g_adapter_watcher.stop();
+}
+
+
+unittest
+{
+    import urt.atomic : atomicFetchAdd;
+
+    struct Probe
+    {
+        static shared uint scans;
+        static shared bool changed;
+
+        static bool enumerate(ref Array!(AdapterWatcher.Entry) entries) nothrow @nogc
+        {
+            uint pass = atomicFetchAdd(scans, 1u);
+            if (pass && !atomicLoad(changed))
+                return false;
+            const(char)[] name = pass == 0 ? "initial" : "updated";
+            AdapterWatcher.Entry e;
+            e.name_buf[0 .. name.length] = name;
+            e.name_len = cast(ubyte)name.length;
+            e.is_ethernet = true;
+            entries ~= e;
+            e.is_ethernet = false;
+            e.is_wifi = true;
+            e.name_buf[0 .. 4] = "wifi";
+            e.name_len = 4;
+            entries ~= e;
+            return true;
+        }
+    }
+
+    AdapterWatcher watcher;
+    watcher._test_enumerate = &Probe.enumerate;
+    scope(exit) watcher.stop();
+    atomicStore(Probe.scans, 0u);
+    atomicStore(Probe.changed, false);
+    watcher._test_fail_start = true;
+    watcher.acquire();
+    assert(watcher._owners == 1 && watcher._thread is null);
+    assert(watcher.ethernet_ring.pending == 1 && watcher.wifi_ring.pending == 1);
+    watcher.acquire();
+    assert(watcher._owners == 2 && watcher._thread !is null);
+    HANDLE worker = watcher._thread;
+    watcher.release();
+    assert(watcher._owners == 1 && watcher._thread == worker);
+    assert(!atomicLoad(watcher._stop));
+    assert(watcher.ethernet_ring.pending == 1 && watcher.wifi_ring.pending == 1);
+    watcher.release();
+    assert(watcher._owners == 0 && watcher._thread is null);
+    assert(!atomicLoad(watcher._stop));
+    assert(watcher._last.ptr is null);
+    assert(watcher.ethernet_ring.empty && watcher.wifi_ring.empty);
+
+    atomicStore(Probe.scans, 0u);
+    atomicStore(Probe.changed, false);
+    watcher.acquire();
+    assert(watcher._thread !is null);
+    assert(watcher.ethernet_ring.pending == 1 && watcher.wifi_ring.pending == 1);
+    assert(watcher.ethernet_ring.peek().name == "initial");
+    worker = watcher._thread;
+    watcher.acquire();
+    assert(watcher._owners == 2 && watcher._thread == worker);
+    watcher.release();
+    assert(watcher._owners == 1 && watcher._thread == worker);
+    assert(watcher.ethernet_ring.pending == 1 && watcher.wifi_ring.pending == 1);
+    watcher.ethernet_ring.pop(1);
+    atomicStore(Probe.changed, true);
+    bool arrived;
+    foreach (i; 0 .. AdapterWatcher.ScanIntervalMs / AdapterWatcher.TickMs + 10)
+    {
+        AdapterEvent[] batch = watcher.ethernet_ring.peek(size_t.max);
+        foreach (ref ev; batch)
+            arrived |= ev.kind == AdapterEventKind.added && ev.name == "updated";
+        watcher.ethernet_ring.pop(batch.length);
+        if (arrived)
+            break;
+        sleep(AdapterWatcher.TickMs.msecs);
+    }
+    assert(arrived, "restarted watcher did not deliver a worker event");
+    watcher.release();
+    assert(watcher.ethernet_ring.empty && watcher.wifi_ring.empty);
+    assert(watcher._last.ptr is null);
 }

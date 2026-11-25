@@ -628,6 +628,11 @@ nothrow @nogc:
         g_app.console.register_command!(neighbor_print, "print")("/sync/neighbor", this);
     }
 
+    override void pre_deinit()
+    {
+        neighbors.clear();
+    }
+
     override void update()
     {
         Collection!UDPDiscovery().update_all();
