@@ -33,7 +33,11 @@ opens an RDP session the peer owns. `encoder=json|binary` selects the wire encod
 
 A session runs while its transport's link is up: a link that drops restarts it, and the next
 session opens when the link returns. Frames that arrive between sessions wait for the next one's
-`hello`, so a remote that speaks first loses nothing.
+`hello`, so a remote that speaks first loses nothing. Each side sends its HELLO without waiting,
+but automatic object introductions wait until a valid inbound Sync message proves the remote is
+receiving. A subscription also releases the barrier, preserving clients that do not send HELLO.
+The early handshake intake remains necessary for WebSocket and xram frames that can arrive before
+the local startup pass.
 
 Listeners spawn peers. `/sync/udp-server` owns one listening RDP endpoint per selected local
 endpoint and spawns a dynamic peer for each session a remote opens; the peer is destroyed when its

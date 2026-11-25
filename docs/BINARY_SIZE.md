@@ -69,6 +69,8 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-24 | urt #418 startup probe | ldc 1.43.0 | 3,878,384 | 153,592 | - | #983 source with startup-only trim and forwarding-iterator trial; fixed BUILD_ID=79b58c6d1c22; +32 B vs 79b58c6d |
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 3,878,352 | 153,592 | - | #983 source with final size-fix candidate, not its pinned runtime; fixed BUILD_ID=79b58c6d1c22; all measured sections match 79b58c6d |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 3,878,352 | 153,592 | - | merged #418 pin, same tree as measured 5218fe63; fixed baseline BUILD_ID; size-neutral vs 79b58c6d |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 3,878,352 | 153,592 | - | #984 matched control via source-identical TODO-only 8d4cb044; BUILD_ID=79b58c6d1c22 |
+| 2026-11-25 | 2016bbef | ldc 1.43.0 | 3,878,808 | 153,592 | - | #984 automatic-introduction readiness, complete proxy walks and reentrant retirement; +456 B (+432 text, +24 rodata), RAM flat; matched c5c2e70b control, same toolchain/flags/pin/source order/BUILD_ID |
 
 ### x86_64 linux, `make COMPILER=ldc CONFIG=release`
 
@@ -97,6 +99,7 @@ row alone. Sizes stay in bytes; round in the note if that reads better.
 | 2026-11-04 | #869 | ldc 1.43.0 | 5,851,368 | 534,920 | | RDP sessions on #870; deployed to the Pi (slot 212), sync peered with F993 over `/interface/udp reliable=yes` |
 | 2026-11-05 | ow/zigbee-attach-assert | ldc 1.43.0 | 5,835,512 | 534,920 | | master 868ba79b9 (#870) with the coordinator dropping its node ID on shutdown; deployed to the Pi (slot 213), five restarts without the attach_node assert |
 | 2026-11-06 | ow/zbdongle-no-flow | ldc 1.43.0 | 5,831,112 | 534,920 | | urt #396 (DTR asserted with flow control `none`) on master b623e6fda; deployed to the Pi (slot 218) with the ZBDongle-E on `flow-control=none`, four restarts with no ASH error |
+| 2026-11-24 | a2b2294e | ldc 1.43.0 | 5,781,664 | 534,672 | - | #984 deployed master+fix, BUILD_ID=fleet-helloX-a2b2294e; Pi slot 226 good, fail 0; diagnostic absolute footprint |
 
 ### ESP32-S3 reference devkit, `make esp-idf-build PLATFORM=esp32-s3 CONFIG=release`
 
@@ -138,6 +141,7 @@ Limit is the 4 MB `ota_0` partition. `ram` is internal DRAM only; PSRAM is heap.
 | 2026-11-04 | #869 | ldc 1.42.0 | 3,015,152 | 141,887 | 4,194,304 | `COREDUMP=1`; reliable UDP (`rdp_open` sessions, `/interface/udp reliable=`) on #870: per-lane assembly, egress waiters and frame room, window headroom, admission by class, idle eviction: +16,464 over #870 (2,998,688), +17,072 over master 6b8d0672a; OTA to F993, sync peered with the Pi over it; RDP=0 on TINY targets |
 | 2026-11-19 | 89ff4a6e | ldc 1.42.0 | 3,010,784 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; master control row for #915 |
 | 2026-11-19 | ow/sync-rdp | ldc 1.42.0 | 3,004,224 | - | 4,194,304 | `COREDUMP=1`, IDF 6.1; #915: sync over RDP, reliability sublayer deleted, one endpoint set for discovery and the sync server, writable on the RDP session timer: -6,560 vs master 89ff4a6e (3,010,784) |
+| 2026-11-24 | a2b2294e | ldc 1.42.0 | 3,001,792 | 141,855 | 4,194,304 | #984 deployed master+fix, IDF 6.1, COREDUMP=1, BUILD_ID=fleet-helloX-a2b2294e; diagnostic absolute footprint |
 
 ### ESP32-C5 DevKitC-1, `make esp-idf-build PLATFORM=esp32-c5 CONFIG=release`
 
@@ -235,6 +239,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-24 | urt #418 5218fe63 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #983 source with size-fix probes, not its pinned runtime; startup-only, forwarding and final shared-iterator probes all image-neutral; final sections match 79b58c6d; BUILD_ID=unknown |
 | 2026-11-24 | #983 / urt c47834e6 | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | merged #418 pin, same tree as measured 5218fe63; size-neutral vs 79b58c6d |
 | 2026-11-25 | c5c2e70b | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | Windows-mounted source tree |
+| 2026-11-24 | c5c2e70b | ldc 1.43.0 | 1,601,716 | 46,428 | 4,194,304 | #984 matched control, BUILD_ID=unknown |
+| 2026-11-25 | 2016bbef | ldc 1.43.0 | 1,602,132 | 46,428 | 4,194,304 | #984 automatic-introduction readiness, complete proxy walks and reentrant retirement; +416 B image/text, RAM flat; matched c5c2e70b control, same toolchain/flags/pin/source order/BUILD_ID |
 | 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,593,684 | 46,428 | 4,194,304 | shared cursor and reference lookup, Windows-mounted source tree |
 | 2026-11-25 | c5c2e70b | ldc 1.43.0 | 1,601,780 | 46,440 | 4,194,304 | matched compiler input order for the following rows |
 | 2026-11-25 | codex/embedded-code-size | ldc 1.43.0 | 1,599,060 | 46,440 | 4,194,304 | shared collection cursor |

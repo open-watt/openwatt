@@ -486,7 +486,7 @@ nothrow @nogc:
 
     bool produce(SyncPeer p)
     {
-        if (p._introducing)
+        if (p._introducing && p.remote_ready)
         {
             if (pump_introductions(p))
                 return true;
@@ -529,10 +529,16 @@ nothrow @nogc:
                 p._binding = false;
                 return false;
             }
-            if (obj._typeInfo.syncable && !obj._is_remote && subscribed(p, obj) && (!bind_to_peer(p, obj) || !p.send_ok(gen)))
+            if (visible_to(p, obj) && subscribed(p, obj) && (!bind_to_peer(p, obj) || !p.send_ok(gen)))
                 return false;
         }
         return p.tx_full();
+    }
+
+    bool visible_to(SyncPeer p, BaseObject obj)
+    {
+        auto upstream = obj.id in authority;
+        return obj._typeInfo.syncable && (!obj._is_remote || (upstream && *upstream !is p));
     }
 
     static bool subscribed(SyncPeer p, BaseObject obj)
@@ -555,7 +561,7 @@ nothrow @nogc:
                 p._introducing = false;
                 return false;
             }
-            if (!obj._typeInfo.syncable || obj._is_remote)
+            if (!visible_to(p, obj))
                 continue;
             if (p.handle_of(obj) != SyncPeer.invalid_handle)
                 continue;   // the lifecycle hook announced it while the walk was paused
@@ -695,16 +701,14 @@ nothrow @nogc:
     {
         ++p._session_gen;   // any burst spanning this teardown is dead, even if its sends succeeded
         p._send_failed = true;   // condemned until the replacement session's startup
+        p.remote_ready = false;
         get_module!SyncPeeringModule.peer_detached(p);
 
         // Destroy proxies we held on this peer's behalf.
-        foreach (obj; p._authoritative[])
-        {
-            authority.remove(obj.id);
-            obj.destroy();
-        }
-        p._authoritative.clear();
-        p._bound.clear();
+        while (!p._authoritative.empty)
+            destroy_proxy(p, p._authoritative[$ - 1]);
+        while (!p._bound.empty)
+            unbind_from_peer(p, p._bound[$ - 1], 0, false);
         p._subscriptions.clear();
         p._introduced.clear();
         p._adopted.clear();
@@ -911,7 +915,7 @@ nothrow @nogc:
         // proxy. add_name first (they may not know it), then bind to any
         // whose subscription patterns match.
         each_running_peer((SyncPeer p) {
-            if (p is from)
+            if (p is from || !p.remote_ready)
                 return;
             encoder_for(p._encoder).encode_add_name(p, proxy);
             foreach (ref pat; p._subscriptions[])
@@ -923,6 +927,28 @@ nothrow @nogc:
                 }
             }
         });
+    }
+
+    void destroy_proxy(SyncPeer from, BaseObject proxy, SyncPeer origin = null, uint origin_seq = 0)
+    {
+        foreach_reverse (i, obj; from._authoritative[])
+            if (obj is proxy)
+            {
+                from._authoritative.remove(i);
+                break;
+            }
+        authority.remove(proxy.id);
+
+        // Notifications can synchronously detach either owner; neither may retire this proxy again.
+        if (origin)
+        {
+            if (find_sync_slot(proxy, origin) != sync_slot_none)
+                unbind_from_peer(origin, proxy, origin_seq);
+            else
+                encoder_for(origin._encoder).encode_unbind(origin, proxy.id, origin_seq);
+        }
+        fan_out_unbind(proxy, null, 0, from);
+        proxy.destroy();
     }
 
     void inbound_unbind(SyncPeer from, CID target, uint seq)
@@ -940,45 +966,19 @@ nothrow @nogc:
             return;
         }
 
-        // Resolve a pending destroy forward: the origin peer gets the
-        // correlated unbind so their request returns an ack.
+        SyncPeer origin;
+        uint origin_seq;
         if (seq)
         {
             auto pf = seq in pending_forwards;
             if (pf && pf.kind == PendingKind.destroy)
             {
-                SyncPeer origin = pf.origin;
-                uint origin_seq = pf.origin_seq;
+                origin = pf.origin;
+                origin_seq = pf.origin_seq;
                 pending_forwards.remove(seq);
-                // Origin may or may not have had this proxy bound. If bound,
-                // unbind_from_peer handles bookkeeping + emits unbind with
-                // correlation. Otherwise emit a bare unbind frame.
-                bool origin_bound = false;
-                foreach (bound; origin._bound[])
-                    if (bound is proxy) { origin_bound = true; break; }
-                if (origin_bound)
-                    unbind_from_peer(origin, proxy, origin_seq);
-                else
-                    encoder_for(origin._encoder).encode_unbind(origin, target, origin_seq);
             }
         }
-
-        // Fan unbind to our other bound peers (hub-of-hubs): they observed
-        // this proxy via us and now must drop it. Do this BEFORE destroying
-        // the proxy locally, otherwise on_object_state(destroyed) would
-        // race us with fan_out_unbind(seq=0).
-        fan_out_unbind(proxy, null, 0, from);
-
-        foreach (i, obj; from._authoritative[])
-        {
-            if (obj is proxy)
-            {
-                from._authoritative.remove(i);
-                break;
-            }
-        }
-        authority.remove(target);
-        proxy.destroy();
+        destroy_proxy(from, proxy, origin, origin_seq);
     }
 
     void inbound_create(SyncPeer from, const(char)[] type, NamedArgument[] props, uint seq)
@@ -1435,6 +1435,15 @@ nothrow @nogc:
         log.info("peer '", from.name[], "' is host '", host, "'", cluster.length ? " in cluster '" : "", cluster, cluster.length ? "'" : "");
     }
 
+    void inbound_ready(SyncPeer from, uint gen)
+    {
+        if (!from.remote_ready && from.send_ok(gen))
+        {
+            from.remote_ready = true;
+            from.arm_tx();
+        }
+    }
+
     void inbound_hello(SyncPeer from, ubyte caps, uint max_message, ulong node_id = 0, PeerRole role = PeerRole.none, const(ubyte)[] nonce = null, uint segment = 0)
     {
         import urt.conv : format_uint;
@@ -1482,6 +1491,7 @@ nothrow @nogc:
 
         if (from.claim)
             get_module!SyncPeeringModule.claim_sibling(from, getTime());
+        from.arm_tx();
     }
 
     void inbound_claim(SyncPeer from, uint seq, const(char)[] cluster, uint priority, const(char)[] auth, const(char)[] key)
@@ -2116,7 +2126,10 @@ nothrow @nogc:
 
     void fan_out_add_name(BaseObject obj)
     {
-        each_running_peer((SyncPeer p) { encoder_for(p._encoder).encode_add_name(p, obj); });
+        each_running_peer((SyncPeer p) {
+            if (p.remote_ready)
+                encoder_for(p._encoder).encode_add_name(p, obj);
+        });
     }
 
     void fan_out_state(BaseObject obj, StateSignal sig)
@@ -2138,24 +2151,22 @@ nothrow @nogc:
         });
     }
 
-    // Emits unbind to every peer that has `obj` bound. `correlate` + `corr_seq`
-    // let the originator of a destroy request receive the correlation ack on
-    // their same unbind frame; all other peers get seq=0. `exclude` skips a
-    // peer entirely - used when the authority already told us, so we don't
-    // echo unbind back to them.
+    // Correlate the requester's unbind; suppress an echo to the authority that
+    // already told us, while still ending every attached owner's local binding.
     void fan_out_unbind(BaseObject obj, SyncPeer correlate = null, uint corr_seq = 0, SyncPeer exclude = null)
     {
-        each_running_peer((SyncPeer p) {
-            if (p is exclude)
-                return;
-            bool has = false;
-            foreach (bound; p._bound[])
-                if (bound is obj) { has = true; break; }
-            if (!has)
-                return;
-            uint s = (p is correlate) ? corr_seq : 0;
-            unbind_from_peer(p, obj, s);
-        });
+        for (size_t i = 0; i < peers.length; )
+        {
+            SyncPeer p = peers[i];
+            if (find_sync_slot(obj, p) == sync_slot_none)
+            {
+                ++i;
+                continue;
+            }
+            uint seq = p is correlate ? corr_seq : 0;
+            unbind_from_peer(p, obj, seq, p.running && p !is exclude);
+            i = 0;   // a refusal can detach this owner and any earlier peer
+        }
     }
 
     // Fan a reset echo to every bound peer. Same correlate/exclude semantics
@@ -2237,6 +2248,8 @@ nothrow @nogc:
 
         // Auto-bind to any peer whose active subscription patterns match.
         each_running_peer((SyncPeer p) {
+            if (!p.remote_ready)
+                return;
             foreach (ref pat; p._subscriptions[])
             {
                 if (pattern_matches(pat[], obj))
@@ -2308,7 +2321,7 @@ nothrow @nogc:
         return peer.send_ok(gen);
     }
 
-    void unbind_from_peer(SyncPeer peer, BaseObject obj, uint seq = 0)
+    void unbind_from_peer(SyncPeer peer, BaseObject obj, uint seq = 0, bool notify = true)
     {
         foreach (i, bound; peer._bound[])
         {
@@ -2346,7 +2359,8 @@ nothrow @nogc:
         if (target != sync_slot_none)
             sync_state_free(target);
 
-        encoder_for(peer._encoder).encode_unbind(peer, obj.id, seq);
+        if (notify)
+            encoder_for(peer._encoder).encode_unbind(peer, obj.id, seq);
     }
 
     // Walk obj's _sync_slot chain and return the slot owned by `peer`, or

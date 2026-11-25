@@ -571,6 +571,7 @@ nothrow @nogc:
         }
         Verb verb = cast(Verb)frame[0];
         Reader r = Reader(frame[1 .. $]);
+        uint gen = peer._session_gen;
 
         final switch (verb)
         {
@@ -653,7 +654,7 @@ nothrow @nogc:
                 if (sig > StateSignal.offline)
                 {
                     log.warning("bad state signal ", sig);
-                    break;
+                    return;
                 }
                 sync.inbound_state(peer, target, cast(StateSignal)sig);
                 break;
@@ -753,7 +754,7 @@ nothrow @nogc:
                 if (!off && sev > Severity.max)
                 {
                     log.warning("bad log_sub severity ", sev);
-                    break;
+                    return;
                 }
                 sync.inbound_log_sub(peer, off ? Severity.info : cast(Severity)sev, off, tag);
                 break;
@@ -852,7 +853,10 @@ nothrow @nogc:
                 uint points = cast(uint)r.varint();
                 size_t count = cast(size_t)r.varint();
                 if (r.fail || count > r.remaining)
+                {
+                    r.fail = true;
                     break;
+                }
                 Array!(const(char)[]) patterns;
                 foreach (i; 0 .. count)
                     patterns ~= r.str();
@@ -865,7 +869,10 @@ nothrow @nogc:
             {
                 size_t count = cast(size_t)r.varint();
                 if (r.fail || count > r.remaining)
+                {
+                    r.fail = true;
                     break;
+                }
                 Array!(const(char)[]) patterns;
                 foreach (i; 0 .. count)
                     patterns ~= r.str();
@@ -897,7 +904,10 @@ nothrow @nogc:
                 const(char)[] name = r.str();
                 size_t count = cast(size_t)r.varint();
                 if (r.fail || count > r.remaining)
+                {
+                    r.fail = true;
                     break;
+                }
                 Variant members;
                 foreach (i; 0 .. count)
                 {
@@ -940,7 +950,10 @@ nothrow @nogc:
                     r.varint();   // lost - informational, mirror ignores it (same as JSON)
                     size_t count = cast(size_t)r.varint();
                     if (r.fail || count > r.remaining)
+                    {
+                        r.fail = true;
                         break;
+                    }
                     foreach (i; 0 .. count)
                     {
                         ulong t_ms = r.varint();
@@ -999,7 +1012,10 @@ nothrow @nogc:
                 r.str();
                 size_t count = cast(size_t)r.varint();
                 if (r.fail || count > r.remaining)
+                {
+                    r.fail = true;
                     break;
+                }
                 foreach (i; 0 .. count)
                     r.str();
                 break;
@@ -1045,6 +1061,8 @@ nothrow @nogc:
 
         if (r.fail)
             log.warning("truncated or malformed '", enum_key_name!Verb(verb), "' frame from '", peer.name[], "'");
+        else if (verb != Verb.fragment)
+            sync.inbound_ready(peer, gen);
     }
 
     // Per-peer per-tick property flush

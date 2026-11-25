@@ -714,6 +714,7 @@ nothrow @nogc:
             return;
         }
 
+        uint gen = peer._session_gen;
         switch (kind_str)
         {
             case "add_name":
@@ -796,7 +797,7 @@ nothrow @nogc:
                 if (!sig || *sig > StateSignal.offline)
                 {
                     log.warning("bad state signal: ", sig_str);
-                    break;
+                    return;
                 }
                 sync.inbound_state(peer, target, *sig);
                 break;
@@ -1185,7 +1186,7 @@ nothrow @nogc:
                     if (!sv)
                     {
                         log.warning("unknown log_sub severity: ", sev_str);
-                        break;
+                        return;
                     }
                     sev = *sv;
                 }
@@ -1201,7 +1202,7 @@ nothrow @nogc:
                 if (!msg_v || !msg_v.isString)
                 {
                     log.warning("log missing string 'msg'");
-                    break;
+                    return;
                 }
                 sync.inbound_log(peer, msg_v.asString());
                 break;
@@ -1238,8 +1239,10 @@ nothrow @nogc:
 
             default:
                 log.warning("unknown kind: ", kind_str);
-                break;
+                return;
         }
+        if (!bad_frame)
+            sync.inbound_ready(peer, gen);
     }
 
     // For bind: iterate the frame's "props" object (if present) and emit one
