@@ -48,7 +48,7 @@ logged once per link: it runs firmware from before sync moved onto RDP, which ne
 answers an RDP session, or its listener does not serve that link. A refused session hears nothing, and the
 opener's handshake backoff paces its retries. Spawned peers are
 `dynamic` instances of `/sync/peer`, named after the remote node once its `hello` identifies it.
-Builds without RDP (`RDP=0`) have no `remote=`, no UDP server and no dialling
+Builds without RDP (`WITHOUT=rdp`) have no `remote=`, no UDP server and no dialling
 member; they sync over WebSocket and shared memory.
 
 Two encoders share one verb space. JSON is the browser-facing form (`ws-server` defaults to it);

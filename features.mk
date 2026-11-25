@@ -98,6 +98,52 @@ ifneq ($(filter-out 0 1,$(MODBUS) $(HTTP_CLIENT) $(HTTP_FILESERVER) $(IPV6) $(GA
     $(error MODBUS, HTTP_CLIENT, HTTP_FILESERVER, IPV6, GATEWAY, RDP and SFP must be 0 or 1)
 endif
 
+# -- Module selection ----------------------------------------------------
+# The legacy variables give the default set; the resolved set projects back onto the smallest tier that compiles it.
+
+include modules.mk
+
+LEGACY_MODS_switch := shell sync profile bridge vlan l2_udp rdp pcap serial wifi wpan ethernet i2c spi sfp modbus sunspec
+LEGACY_MODS_switch-ip := $(LEGACY_MODS_switch) ip_stack inet inet6 udp tcp ip_forward ipv6_ra dhcp_client dhcp_server
+LEGACY_MODS_switch-http := $(LEGACY_MODS_switch-ip) http_server http_client http_binding websocket http_files api ota automation
+LEGACY_MODS_switch-https := $(LEGACY_MODS_switch-http) tls
+
+LEGACY_BARRED := $(if $(filter 0,$(MODBUS)),modbus) $(if $(filter 0,$(HTTP_CLIENT)),http_client) \
+    $(if $(filter 0,$(HTTP_FILESERVER)),http_files) $(if $(filter 0,$(IPV6)),inet6) \
+    $(if $(filter 0,$(GATEWAY)),ip_forward ipv6_ra dhcp_server) $(if $(filter 0,$(RDP)),rdp) \
+    $(if $(filter 0,$(SFP)),sfp) $(if $(filter 1,$(HEADLESS)),shell)
+
+mod_comma := ,
+LEGACY_CLI := $(foreach v,FEATURES HEADLESS MODBUS HTTP_CLIENT HTTP_FILESERVER IPV6 GATEWAY RDP SFP,$(if $(filter command line,$(origin $v)),$v))
+$(foreach v,$(LEGACY_CLI),$(warning $v= is deprecated; select modules with MODULES$(mod_comma) WITH and WITHOUT))
+
+ifneq ($(origin MODULES),command line)
+    $(call mod_root,default,default FEATURES=$(FEATURES),$(if $(filter full,$(FEATURES)),full,$(addsuffix ?,$(LEGACY_MODS_$(FEATURES)))))
+    MOD_ROOTS := default
+    MOD_LEGACY_BARRED := $(LEGACY_BARRED)
+else ifneq ($(filter FEATURES,$(LEGACY_CLI)),)
+    $(error MODULES replaces FEATURES; give one of them)
+else
+    $(call mod_root,modules,MODULES,$(MODULES))
+    MOD_ROOTS := modules
+    MOD_LEGACY_BARRED := $(if $(LEGACY_CLI),$(LEGACY_BARRED))
+endif
+$(call mod_root,with,WITH,$(WITH))
+$(call mod_resolve,$(MOD_ROOTS) with,$(WITHOUT) $(filter-out $(WITH),$(MOD_LEGACY_BARRED)))
+$(mod_report)
+
+MOD_TIER := $(firstword $(foreach t,switch switch-ip switch-http switch-https,$(if $(filter-out $(LEGACY_MODS_$t) $(MOD_UMBRELLAS),$(MOD_SET)),,$t)) full)
+legacy_axis = $(if $(filter full,$(MOD_TIER))$(filter $(firstword $1),$(LEGACY_MODS_$(MOD_TIER))),$(if $(filter $1,$(MOD_SET)),$2,$3),$4)
+override FEATURES := $(MOD_TIER)
+override MODBUS := $(call legacy_axis,modbus,1,0,$(MODBUS))
+override HTTP_CLIENT := $(call legacy_axis,http_client,1,0,$(HTTP_CLIENT))
+override HTTP_FILESERVER := $(call legacy_axis,http_files,1,0,$(HTTP_FILESERVER))
+override IPV6 := $(call legacy_axis,inet6,1,0,$(IPV6))
+override GATEWAY := $(call legacy_axis,ip_forward dhcp_server ipv6_ra,1,0,$(GATEWAY))
+override RDP := $(call legacy_axis,rdp,1,0,$(RDP))
+override SFP := $(call legacy_axis,sfp,1,0,$(SFP))
+override HEADLESS := $(call legacy_axis,shell,0,1,$(HEADLESS))
+
 # -- Source-tree subset per preset ---------------------------------------
 # main.d at $(SRCDIR) root is always included by the main Makefile.
 

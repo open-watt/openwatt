@@ -369,6 +369,10 @@ endif
 .PHONY: build
 build: $(TARGET) $(EXTRA_ARTEFACTS)
 
+.PHONY: explain-modules
+explain-modules:
+	$(mod_explain)@echo "builds as FEATURES=$(FEATURES) MODBUS=$(MODBUS) HTTP_CLIENT=$(HTTP_CLIENT) HTTP_FILESERVER=$(HTTP_FILESERVER) IPV6=$(IPV6) GATEWAY=$(GATEWAY) RDP=$(RDP) SFP=$(SFP) HEADLESS=$(HEADLESS)"
+
 $(TARGET): $(SOURCES) $(CONF_SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BAREMETAL_LD) $(BAREMETAL_LD_DEPS) $(BUILD_CONFIG_DIR)/build_id $(BK_BEKEN_LIB) $(if $(RAM_IMAGE),$(RAM_IMAGE_PACKER))
 # Through the environment: native Windows make truncates a recipe line past 8K and collapses its backslashes.
 $(TARGET): export OW_SOURCES := $(SOURCES)
