@@ -1297,23 +1297,30 @@ nothrow @nogc:
 
     ulong varint()
     {
-        ulong v = 0;
-        uint shift = 0;
-        for (;;)
+        // Preserve the cursor advance when a caller continues after failure.
+        if (fail)
         {
-            ubyte b = u8();
-            if (fail)
-                return 0;
-            v |= ulong(b & 0x7F) << shift;
-            if (!(b & 0x80))
-                return v;
-            shift += 7;
-            if (shift >= 64)
-            {
-                fail = true;
-                return 0;
-            }
+            u8();
+            return 0;
         }
+
+        enum max_bytes = 10;
+        size_t end = pos + (remaining < max_bytes ? remaining : max_bytes);
+        ulong value;
+        uint shift;
+        foreach (i, b; buf[pos .. end])
+        {
+            value |= ulong(b & 0x7F) << shift;
+            if (b < 0x80)
+            {
+                pos += i + 1;
+                return value;
+            }
+            shift += 7;
+        }
+        pos = end;
+        fail = true;
+        return 0;
     }
 
     long zigzag()
@@ -1436,6 +1443,14 @@ unittest
         Reader r = Reader(buf[]);
         assert(r.varint() == v && !r.fail);
     }
+    ubyte[11] unterminated;
+    unterminated[0 .. 10] = 0x80;
+    unterminated[10] = 1;
+    Reader short_varint = Reader(unterminated[0 .. 9]);
+    assert(short_varint.varint() == 0 && short_varint.fail && short_varint.remaining == 0);
+    Reader long_varint = Reader(unterminated[]);
+    assert(long_varint.varint() == 0 && long_varint.fail && long_varint.remaining == 1);
+
     foreach (long v; [long(0), -1, 1, -64, 63, long.min, long.max])
     {
         buf.clear();
