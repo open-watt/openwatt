@@ -20,17 +20,18 @@ import protocol.ip.tcp_stream;
 nothrow @nogc:
 
 
-final class TelnetModule : Module
+struct TelnetModule
 {
-    mixin DeclareModule!"protocol.telnet";
+    mixin DeclareStaticModule!"protocol.telnet";
+    static __gshared TelnetModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.register_enum!TelnetRole();
 
         g_app.console.register_collection!TelnetStream();
         g_app.console.register_collection!TelnetServer();
-        g_app.console.register_command!telnet("/tools", this);
+        g_app.console.register_command!telnet("/tools", &this);
     }
 }

@@ -27,27 +27,28 @@ enum TimeKind : ubyte
 }
 
 // The built-in time signal provider: schemes `every:<dur>`, `at:<hh:mm>?days=...`, `when:<datetime>`.
-final class CronModule : Module, ISignalProvider
+struct CronModule
 {
-    mixin DeclareModule!"cron";
+    mixin DeclareStaticModule!"cron";
+    static __gshared CronModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.register_enum!Weekday();
 
-        g_app.register_signal_provider(StringLit!"every", this);
-        g_app.register_signal_provider(StringLit!"at", this);
-        g_app.register_signal_provider(StringLit!"when", this);
+        g_app.register_signal_provider(StringLit!"every", signal_provider(&this));
+        g_app.register_signal_provider(StringLit!"at", signal_provider(&this));
+        g_app.register_signal_provider(StringLit!"when", signal_provider(&this));
     }
 
-    override StringResult validate(ref const SignalUri uri) const
+    StringResult validate(ref const SignalUri uri) const
     {
         TimeSpec spec;
         return parse_time(uri, spec);
     }
 
-    override StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
+    StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
     {
         TimeSpec spec;
         StringResult e = parse_time(uri, spec);
@@ -68,14 +69,14 @@ nothrow @nogc:
         return StringResult.success;
     }
 
-    override void unsubscribe(SignalSub handle)
+    void unsubscribe(SignalSub handle)
     {
         TimeSub s = cast(TimeSub)cast(void*)handle;
         s.disarm();
         free(s);
     }
 
-    override SysTime next_run(SignalSub handle) const
+    SysTime next_run(SignalSub handle) const
     {
         TimeSub s = cast(TimeSub)cast(void*)handle;
         return s.next_run();
@@ -98,7 +99,7 @@ nothrow @nogc:
     bool repeat = true;
 
     override ISignalProvider provider()
-        => get_module!CronModule;
+        => signal_provider(get_module!CronModule);
 
     void arm()
     {

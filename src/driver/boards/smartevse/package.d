@@ -153,7 +153,7 @@ import manager : EventPriority, g_app, register_doorbell;
 import manager.base : ActiveObject, CompletionStatus, ObjectFlags, Prop;
 import manager.collection : CID, Collection, CollectionType, collection_type_info;
 import manager.console.session : Session;
-import manager.plugin : DeclareModule, Module;
+import manager.plugin : DeclareStaticModule;
 
 import driver.boards.smartevse.display;
 import driver.boards.smartevse.binding : SmartEVSEBinding;
@@ -894,12 +894,13 @@ private:
 }
 
 
-class SmartEVSEModule : Module
+struct SmartEVSEModule
 {
-    mixin DeclareModule!"driver.boards.smartevse";
+    mixin DeclareStaticModule!"driver.boards.smartevse";
+    static __gshared SmartEVSEModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         g_app.register_enum!SmartEVSEState();
         g_app.register_enum!SmartEVSEPilot();
@@ -907,9 +908,9 @@ nothrow @nogc:
         g_app.register_enum!SmartEVSEADCCalibration();
         g_app.console.register_collection!SmartEVSE();
         g_app.console.register_collection!SmartEVSEBinding();
-        g_app.console.register_command!(cmd_start, "start")("/driver/boards/smartevse", this);
-        g_app.console.register_command!(cmd_stop, "stop")("/driver/boards/smartevse", this);
-        g_app.console.register_command!(cmd_display, "display")("/driver/boards/smartevse", this);
+        g_app.console.register_command!(cmd_start, "start")("/driver/boards/smartevse", &this);
+        g_app.console.register_command!(cmd_stop, "stop")("/driver/boards/smartevse", &this);
+        g_app.console.register_command!(cmd_display, "display")("/driver/boards/smartevse", &this);
         g_display_doorbell = register_doorbell(&display_pump, EventPriority.control);
 
         if (setup() != 0)
@@ -922,7 +923,7 @@ nothrow @nogc:
         _hardware_ready = true;
     }
 
-    override void deinit()
+    void deinit()
     {
         _active_hardware_owner = null;
         if (_hardware_ready)
@@ -933,7 +934,7 @@ nothrow @nogc:
         _hardware_ready = false;
     }
 
-    override void update()
+    void update()
     {
         Collection!SmartEVSE().update_all();
         if (_hardware_ready)

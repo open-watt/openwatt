@@ -17,12 +17,12 @@ nothrow @nogc:
 
 static if (has_tls)
 {
-    final class TLSModule : Module
+    struct TLSModule
     {
-        mixin DeclareModule!"tls";
+    mixin DeclareStaticModule!"tls";
     nothrow @nogc:
 
-        override void init()
+        static void init()
         {
             g_app.register_enum!CertType();
             g_app.register_enum!CertStatus();
@@ -32,7 +32,7 @@ static if (has_tls)
             g_app.console.register_collection!TLSServer();
         }
 
-        override void update()
+        static void update()
         {
             Collection!Certificate().update_all();
             Collection!TLSServer().update_all();

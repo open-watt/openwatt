@@ -14,12 +14,12 @@ public import protocol.snmp.agent;
 nothrow @nogc:
 
 
-final class SNMPModule : Module
+struct SNMPModule
 {
-    mixin DeclareModule!"protocol.snmp";
+    mixin DeclareStaticModule!"protocol.snmp";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!SNMPVersion();
 
@@ -27,7 +27,7 @@ nothrow @nogc:
         g_app.console.register_collection!SNMPAgent();
     }
 
-    override void update()
+    static void update()
     {
         Collection!SNMPClient().update_all();
         Collection!SNMPAgent().update_all();

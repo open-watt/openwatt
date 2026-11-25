@@ -240,7 +240,7 @@ private:
         import urt.mem : alloc, free;
 
         if (!can_section_kind)
-            can_section_kind = register_profile_section("can", alloc!CANProtocolModule(null));
+            can_section_kind = register_profile_section("can", alloc!CANProtocolModule());
         Profile* profile = parse_profile("elements:\n\tcan: 42, 0, u8\tdesc: level\n", "can-first-sample");
         assert(profile);
         scope(exit) free(profile);

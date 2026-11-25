@@ -424,12 +424,12 @@ private:
     }
 }
 
-final class I2CModule : Module
+struct I2CModule
 {
-    mixin DeclareModule!"router.iface.i2c";
+    mixin DeclareStaticModule!"router.iface.i2c";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         register_packet_codec!I2CFrame();
         g_app.register_enum!I2CFrameType();

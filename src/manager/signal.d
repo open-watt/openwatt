@@ -31,14 +31,19 @@ nothrow @nogc:
     ISignalProvider provider();
 }
 
-interface ISignalProvider
+struct ISignalProvider
 {
-nothrow @nogc:
-    StringResult validate(ref const SignalUri uri) const;
-    StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle);
-    void unsubscribe(SignalSub handle);
-    SysTime next_run(SignalSub handle) const;
+    StringResult delegate(ref const SignalUri) nothrow @nogc validate;
+    StringResult delegate(ref const SignalUri, SignalSink, out SignalSub) nothrow @nogc subscribe;
+    void delegate(SignalSub) nothrow @nogc unsubscribe;
+    SysTime delegate(SignalSub) nothrow @nogc next_run;
+
+    bool opCast(T : bool)() const pure
+        => validate.funcptr !is null;
 }
+
+ISignalProvider signal_provider(T)(T instance)
+    => ISignalProvider(&instance.validate, &instance.subscribe, &instance.unsubscribe, &instance.next_run);
 
 
 StringResult parse_signal_uri(const(char)[] uri, out SignalUri result)

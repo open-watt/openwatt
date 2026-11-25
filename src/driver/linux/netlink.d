@@ -35,13 +35,15 @@ void subscribe_link_changed(LinkChangedHandler handler)
 private __gshared Array!LinkChangedHandler g_link_handlers;
 
 
-final class LinuxNetlinkModule : Module
+struct LinuxNetlinkModule
 {
-    mixin DeclareModule!"os.netlink";
+    mixin DeclareStaticModule!"os.netlink";
+    static __gshared LinuxNetlinkModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
+        _fd = -1;
         _fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
         if (_fd < 0)
         {
@@ -70,7 +72,7 @@ nothrow @nogc:
         }
     }
 
-    override void update()
+    void update()
     {
         if (_fd < 0)
             return;
@@ -95,7 +97,7 @@ nothrow @nogc:
     }
 
 private:
-    int _fd = -1;
+    int _fd;
 
     void dispatch(const(ubyte)[] data)
     {

@@ -134,7 +134,7 @@ protected:
         version (DebugZigbee)
             log.debugf("receive poll request from {0,04x} - transmit_expected: {1}", childId, transmitExpected);
 
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
         NodeMap* n = mod_zb.find_node(pan_id, childId);
         if (n)
         {
@@ -198,7 +198,7 @@ protected:
                     return ZDOReply.intentionally_none;
                 }
 
-                ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+                ZigbeeProtocolModule* mod_zb = get_module!ZigbeeProtocolModule;
 
                 auto n = mod_zb.attach_node(eui, _network_params.pan_id, id);
 

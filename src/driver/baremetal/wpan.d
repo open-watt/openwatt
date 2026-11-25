@@ -297,12 +297,12 @@ private:
 }
 
 
-final class BuiltinWpanModule : Module
+struct BuiltinWpanModule
 {
-    mixin DeclareModule!"interface.wpan.builtin";
+    mixin DeclareStaticModule!"interface.wpan.builtin";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!BuiltinWpan();
         BuiltinWpan._service_doorbell = register_doorbell(&BuiltinWpan.service_radios, EventPriority.bulk);

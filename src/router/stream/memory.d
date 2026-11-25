@@ -287,12 +287,12 @@ private:
 }
 
 
-final class MemoryStreamModule : Module
+struct MemoryStreamModule
 {
-    mixin DeclareModule!"stream.memory";
+    mixin DeclareStaticModule!"stream.memory";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!MemoryMode();
         g_app.console.register_collection!MemoryStream();

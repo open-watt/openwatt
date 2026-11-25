@@ -923,12 +923,12 @@ private:
 }
 
 
-final class GpioModule : Module
+struct GpioModule
 {
-    mixin DeclareModule!"protocol.gpio";
+    mixin DeclareStaticModule!"protocol.gpio";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!Pull();
         g_app.register_enum!GpioKind();

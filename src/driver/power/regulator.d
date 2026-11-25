@@ -15,7 +15,7 @@ import manager.component : Component, ComponentEvent;
 import manager.console;
 import manager.device : DeviceBuilder;
 import manager.element : Access, Element, SampleUpdate, SamplingMode;
-import manager.plugin : Module, DeclareModule;
+import manager.plugin : DeclareStaticModule;
 import manager.series : register_value_format;
 
 import urt.driver.gpio : GpioInterruptTrigger, Pull;
@@ -434,12 +434,12 @@ unittest
     assert(frequency.has_value && frequency.record_value().asQuantity().value == 50);
 }
 
-class PowerRegulatorModule : Module
+struct PowerRegulatorModule
 {
-    mixin DeclareModule!"driver.power.regulator";
+    mixin DeclareStaticModule!"driver.power.regulator";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!FireMode();
         g_app.register_enum!ZcEdge();

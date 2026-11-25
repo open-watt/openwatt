@@ -26,18 +26,19 @@ nothrow @nogc:
 
 package __gshared uint can_section_kind;
 
-final class CANProtocolModule : Module, ProfileSections
+struct CANProtocolModule
 {
-    mixin DeclareModule!"protocol.can";
+    mixin DeclareStaticModule!"protocol.can";
+    static __gshared CANProtocolModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         register_packet_codec!CANFrame();
 
         g_app.register_enum!CANInterfaceProtocol();
 
-        can_section_kind = register_profile_section("can", this);
+        can_section_kind = register_profile_section("can", &this);
 
         g_app.console.register_collection!CANInterface();
         static if (num_can > 0)

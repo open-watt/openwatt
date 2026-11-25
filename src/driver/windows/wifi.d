@@ -467,32 +467,32 @@ private:
 // its wifi event ring each update.
 // ---------------------------------------------------------------------------
 
-final class WindowsWlanModule : Module
+struct WindowsWlanModule
 {
-    mixin DeclareModule!"wifi.windows";
+    mixin DeclareStaticModule!"wifi.windows";
 nothrow @nogc:
 
-    override void pre_init()
+    static void pre_init()
     {
         g_adapter_watcher.scan_sync();
         drain_events();
     }
 
-    override void init()
+    static void init()
     {
         g_app.console.register_collection!WindowsWifiRadio();
         g_app.console.register_collection!WindowsWlan();
         g_adapter_watcher.start();
     }
 
-    override void update()
+    static void update()
     {
         drain_events();
     }
 
 private:
 
-    void drain_events()
+    static void drain_events()
     {
         // peek() returns a contiguous slice; if events wrap the ring boundary
         // we get the head portion this iteration and the wrapped portion next.
@@ -507,7 +507,7 @@ private:
         }
     }
 
-    void apply_event(ref const AdapterEvent ev)
+    static void apply_event(ref const AdapterEvent ev)
     {
         import urt.log;
 
@@ -549,7 +549,7 @@ private:
     }
 
     // Pick the lowest unused "wlanN" name so the paired radio gets "wlanN-radio".
-    const(char)[] next_radio_name()
+    static const(char)[] next_radio_name()
     {
         for (int n = 1; n < 256; ++n)
         {

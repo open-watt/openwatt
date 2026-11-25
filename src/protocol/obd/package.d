@@ -44,16 +44,17 @@ struct ElementDesc_OBD
     ushort desc = 0xFFFF;
 }
 
-final class OBDProtocolModule : Module, ProfileSections
+struct OBDProtocolModule
 {
-    mixin DeclareModule!"protocol.obd";
+    mixin DeclareStaticModule!"protocol.obd";
+    static __gshared OBDProtocolModule module_state;
 nothrow @nogc:
 
-    override void init()
+    void init()
     {
         register_packet_codec!OBDFrame();
 
-        obd_section_kind = register_profile_section("obd", this);
+        obd_section_kind = register_profile_section("obd", &this);
 
         g_app.console.register_collection!OBDInterface();
         g_app.console.register_collection!OBDBinding();
@@ -939,7 +940,7 @@ unittest
     }
 
     if (!obd_section_kind)
-        obd_section_kind = register_profile_section("obd", alloc!OBDProtocolModule(null));
+        obd_section_kind = register_profile_section("obd", alloc!OBDProtocolModule());
     Profile* profile = parse_profile("elements:\n\tobd: 1, 0x0C, 0, u16\tdesc: speed\n", "obd-first-sample");
     assert(profile);
     scope(exit) free(profile);

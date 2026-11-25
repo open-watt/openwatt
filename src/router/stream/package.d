@@ -921,23 +921,24 @@ private:
     }
 }
 
-final class StreamModule : Module
+struct StreamModule
 {
-    mixin DeclareModule!"stream";
+    mixin DeclareStaticModule!"stream";
+    static __gshared StreamModule module_state;
 nothrow @nogc:
 
-    override void pre_init()
+    void pre_init()
     {
         g_app.console.register_collection!Stream();
     }
 
-    override void init()
+    void init()
     {
-        g_app.console.register_command!(stream_tap, "tap")("/stream", this);
-        g_app.console.register_command!(stream_rts, "rts")("/stream", this);
+        g_app.console.register_command!(stream_tap, "tap")("/stream", &this);
+        g_app.console.register_command!(stream_rts, "rts")("/stream", &this);
     }
 
-    override void pre_update()
+    void pre_update()
     {
         Collection!Stream().update_all();
     }

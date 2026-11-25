@@ -141,9 +141,10 @@ nothrow @nogc:
     }
 }
 
-final class SyncModule : Module
+struct SyncModule
 {
-    mixin DeclareModule!"sync";
+    mixin DeclareStaticModule!"sync";
+    static __gshared SyncModule module_state;
 nothrow @nogc:
 
     Array!SyncPeer             peers;
@@ -155,13 +156,13 @@ nothrow @nogc:
     uint                       _timebase_version;  // our version as a clock authority
     SyncPeer                   _applying_push;     // peer whose delta push we're applying
 
-    override void init()
+    void init()
     {
         g_app.register_enum!SyncEncoderKind();
 
-        g_json_encoder = alloc!JsonEncoder(this);
+        g_json_encoder = alloc!JsonEncoder(&this);
         g_encoders[SyncEncoderKind.json] = g_json_encoder;
-        g_binary_encoder = alloc!BinaryEncoder(this);
+        g_binary_encoder = alloc!BinaryEncoder(&this);
         g_encoders[SyncEncoderKind.binary] = g_binary_encoder;
 
         g_app.console.register_collection!SyncPeer();
@@ -170,9 +171,9 @@ nothrow @nogc:
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
-        g_app.console.register_command!(sync_log_sub, "log-sub")("/sync", this);
-        g_app.console.register_command!(sync_model_sub, "model-sub")("/sync", this);
-        g_app.console.register_command!(sync_console, "console")("/sync", this);
+        g_app.console.register_command!(sync_log_sub, "log-sub")("/sync", &this);
+        g_app.console.register_command!(sync_model_sub, "model-sub")("/sync", &this);
+        g_app.console.register_command!(sync_console, "console")("/sync", &this);
 
         set_log_hostname(hostname[]);
 
@@ -183,12 +184,12 @@ nothrow @nogc:
         subscribe_clock_change(&on_clock_step);
     }
 
-    override void deinit()
+    void deinit()
     {
         unsubscribe_clock_change(&on_clock_step);
     }
 
-    override void update()
+    void update()
     {
         static if (has_rdp)
             Collection!UDPSyncServer().update_all();
@@ -3002,14 +3003,14 @@ bool model_value_is_newer(SysTime current, ulong t_ms, SysTime timestamp) pure
 
 void sync_model_sub(Session session, SyncPeer peer, const(char)[] pattern, Nullable!bool once)
 {
-    SyncModule mod = get_module!SyncModule;
+    SyncModule* mod = get_module!SyncModule;
     const(char)[][1] patterns = [pattern];
     encoder_for(peer._encoder).encode_model_sub(peer, mod.alloc_seq(), patterns[], !once || once.value);
 }
 
 CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity severity, Nullable!(const(char)[]) tag)
 {
-    SyncModule mod = get_module!SyncModule;
+    SyncModule* mod = get_module!SyncModule;
     SyncPeer target;
     foreach (p; mod.peers[])
     {

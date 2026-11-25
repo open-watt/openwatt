@@ -24,21 +24,22 @@ struct NSLookupResult
     // TODO: details...
 }
 
-final class DNSModule : Module
+struct DNSModule
 {
-    mixin DeclareModule!"protocol.dns";
+    mixin DeclareStaticModule!"protocol.dns";
+    static __gshared DNSModule module_state;
 nothrow @nogc:
 
     // TODO - DNS/name cache
 
-    override void init()
+    void init()
     {
         g_app.console.register_collection!DNSServer();
 
-        g_app.console.register_command!(request, "lookup")("/protocol/dns", this);
+        g_app.console.register_command!(request, "lookup")("/protocol/dns", &this);
     }
 
-    override void update()
+    void update()
     {
         Collection!DNSServer().update_all();
     }

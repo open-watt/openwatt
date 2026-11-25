@@ -4,7 +4,7 @@ import urt.driver.wifi : num_wifi;
 
 // Platform-selected wifi driver backend(s). manager.plugin registers
 // `driver.wifi` and the conditional aliases here resolve to the right
-// concrete *Module class. Add entries below as new backends land
+// concrete *Module struct. Add entries below as new backends land
 // (driver/posix/wifi.d, ...).
 //
 // NB: the wifi-side hierarchy is more complicated than ethernet because

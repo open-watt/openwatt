@@ -43,12 +43,12 @@ enum PPPProtocol
 }
 
 
-final class PPPModule : Module
+struct PPPModule
 {
-    mixin DeclareModule!"protocol.ppp";
+    mixin DeclareStaticModule!"protocol.ppp";
 nothrow @nogc:
 
-    override void init()
+    static void init()
     {
         g_app.register_enum!TunnelProtocol();
 
@@ -58,7 +58,7 @@ nothrow @nogc:
         g_app.console.register_collection!PPPoEServer();
     }
 
-    override void update()
+    static void update()
     {
         Collection!PPPServer().update_all();
         Collection!PPPoEServer().update_all();
