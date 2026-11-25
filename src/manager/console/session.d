@@ -462,9 +462,26 @@ nothrow @nogc:
     void write_line(Args...)(auto ref Args args)
         if (Args.length != 1 || !is(Args[0] : const(char)[]))
     {
-        import urt.string.format;
+        static if (Args.length == 1)
+        {
+            import urt.mem.temp : tconcat;
+            write_output(tconcat(forward!args), true);
+        }
+        else
+        {
+            import urt.string.format : ConcatArg, concat_mask, make_concat_args;
 
-        write_output(tconcat(forward!args), true);
+            ConcatArg[Args.length] packed = void;
+            make_concat_args(args, packed.ptr);
+            write_packed_line(packed.ptr, concat_mask!Args);
+        }
+    }
+
+    pragma(inline, false)
+    private final void write_packed_line(const(void)* packed, size_t mask)
+    {
+        import urt.mem.temp : tconcat_impl;
+        write_output(tconcat_impl(packed, mask), true);
     }
 
     void writef(Args...)(const(char)[] format, auto ref Args args)

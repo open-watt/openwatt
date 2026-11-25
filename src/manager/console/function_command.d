@@ -68,11 +68,8 @@ template function_command_desc(alias fun, string command_name = null)
     private static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
     {
         ArgTuple _args;
-        if (const(char)[] error = marshal_arguments(function_command_desc, arguments, parameters, &_args))
-        {
-            session.write_line(error);
+        if (!marshal_command_arguments(session, function_command_desc, arguments, parameters, &_args))
             return null;
-        }
         static if (is(__traits(parent, fun)))
         {
             static if (is(ReturnType!fun == void))
@@ -403,6 +400,15 @@ const(char)[] convert_argument(T)(ref const Variant v, void* arg)
     }
     else
         return from_variant(v, *cast(T*)arg);
+}
+
+pragma(inline, false)
+private bool marshal_command_arguments(Session session, ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] params, void* buffer)
+{
+    const(char)[] error = marshal_arguments(desc, args, params, buffer);
+    if (error)
+        session.write_line(error);
+    return !error;
 }
 
 const(char)[] marshal_arguments(ref immutable CommandDesc desc, const Variant[] args, const NamedArgument[] parameters, void* buffer)
