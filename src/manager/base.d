@@ -1309,25 +1309,25 @@ struct ObjectLog
 nothrow @nogc:
     const(BaseObject) object;
 
-    void emergency(T...)(ref T args) { write_log(Severity.emergency, object.type(), object.name()[], args); }
-    void alert(T...)(ref T args) { write_log(Severity.alert, object.type(), object.name()[], args); }
-    void critical(T...)(ref T args) { write_log(Severity.critical, object.type(), object.name()[], args); }
-    void error(T...)(ref T args) { write_log(Severity.error, object.type(), object.name()[], args); }
-    void warning(T...)(ref T args) { write_log(Severity.warning, object.type(), object.name()[], args); }
-    void notice(T...)(ref T args) { write_log(Severity.notice, object.type(), object.name()[], args); }
-    void info(T...)(ref T args) { write_log(Severity.info, object.type(), object.name()[], args); }
-    void debug_(T...)(ref T args) { write_log(Severity.debug_, object.type(), object.name()[], args); }
-    void trace(T...)(ref T args) { write_log(Severity.trace, object.type(), object.name()[], args); }
+    pragma(inline, true) void emergency(T...)(ref T args) { write_log_from(Severity.emergency, object, args); }
+    pragma(inline, true) void alert(T...)(ref T args) { write_log_from(Severity.alert, object, args); }
+    pragma(inline, true) void critical(T...)(ref T args) { write_log_from(Severity.critical, object, args); }
+    pragma(inline, true) void error(T...)(ref T args) { write_log_from(Severity.error, object, args); }
+    pragma(inline, true) void warning(T...)(ref T args) { write_log_from(Severity.warning, object, args); }
+    pragma(inline, true) void notice(T...)(ref T args) { write_log_from(Severity.notice, object, args); }
+    pragma(inline, true) void info(T...)(ref T args) { write_log_from(Severity.info, object, args); }
+    pragma(inline, true) void debug_(T...)(ref T args) { write_log_from(Severity.debug_, object, args); }
+    pragma(inline, true) void trace(T...)(ref T args) { write_log_from(Severity.trace, object, args); }
 
-    void emergencyf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.emergency, object.type(), object.name()[], fmt, args); }
-    void alertf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.alert, object.type(), object.name()[], fmt, args); }
-    void criticalf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.critical, object.type(), object.name()[], fmt, args); }
-    void errorf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.error, object.type(), object.name()[], fmt, args); }
-    void warningf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.warning, object.type(), object.name()[], fmt, args); }
-    void noticef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.notice, object.type(), object.name()[], fmt, args); }
-    void infof(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.info, object.type(), object.name()[], fmt, args); }
-    void debugf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.debug_, object.type(), object.name()[], fmt, args); }
-    void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, object.type(), object.name()[], fmt, args); }
+    pragma(inline, true) void emergencyf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.emergency, object, fmt, args); }
+    pragma(inline, true) void alertf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.alert, object, fmt, args); }
+    pragma(inline, true) void criticalf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.critical, object, fmt, args); }
+    pragma(inline, true) void errorf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.error, object, fmt, args); }
+    pragma(inline, true) void warningf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.warning, object, fmt, args); }
+    pragma(inline, true) void noticef(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.notice, object, fmt, args); }
+    pragma(inline, true) void infof(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.info, object, fmt, args); }
+    pragma(inline, true) void debugf(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.debug_, object, fmt, args); }
+    pragma(inline, true) void tracef(T...)(const(char)[] fmt, ref T args) { write_logf_from(Severity.trace, object, fmt, args); }
 }
 
 
