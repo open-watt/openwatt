@@ -281,6 +281,10 @@ ifdef BAREMETAL_DIR
 
   ifdef BAREMETAL_LD
     DFLAGS := $(DFLAGS) -L-T$(BAREMETAL_LD)
+    ifeq ($(CONFIG)/$(COMPILER),release/ldc)
+      # Use --keep-unique for functions whose addresses serve as identities.
+      DFLAGS += --addrsig -L--icf=all
+    endif
   endif
 
   # BK7231: link vendor runtime, drivers and WiFi/BLE blobs
