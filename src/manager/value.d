@@ -350,53 +350,22 @@ const(char[]) from_variant(ref const Variant v, out String r) nothrow @nogc
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is(T U == enum))
 {
-    // TODO: variant may be an enum...
-//    if (v.isUser!T)
-//        r = v.asUser!T;
-//    else if (v.isString)
-    if (v.isString)
+    import urt.meta.enuminfo : enum_info, is_bitfield_enum;
+
+    Variant parsed;
+    long flags;
+    if (const(char)[] error = read_enum_value(v, enum_info!T.make_void(), parsed, is_bitfield_enum!T ? &flags : null))
+        return error;
+    static if (is_bitfield_enum!T)
     {
-        // try and parse a key from the string...
-        const(char)[] s = v.asString;
-        if (!s)
-            return "No value";
-        import urt.meta.enuminfo : enum_info, is_bitfield_enum;
-        Variant value = enum_value_icase(enum_info!T.make_void(), s);
-        if (!value.isNull)
+        if (parsed.isNull)
         {
-            r = cast(T)value.as!(EnumType!T);
+            r = cast(T)flags;
             return null;
         }
-
-        static if (is_bitfield_enum!T)
-        {
-            bool ok;
-            long combined = enum_info!T.make_void().parse_flags(s, ok);
-            if (ok)
-            {
-                r = cast(T)combined;
-                return null;
-            }
-        }
     }
-
-    // else parse the base type?
-    // TODO: could be a non-key... do we want to allow this?
-
-    return "Invalid value";
-}
-
-pragma(inline, false)
-private Variant enum_value_icase(const(VoidEnumInfo)* info, const(char)[] value)
-{
-    import urt.string.ascii : ieq;
-    foreach (i; 0 .. info.count)
-    {
-        const(char)[] key = info.key_by_sorted_index(i);
-        if (ieq(key, value))
-            return info.value_for(key);
-    }
-    return Variant();
+    r = cast(T)parsed.as!(EnumType!T);
+    return null;
 }
 
 const(char[]) from_variant(U)(ref const Variant v, out Array!U r) nothrow @nogc
@@ -634,4 +603,55 @@ bool parse_integer_token(const(char)[] s, out long value)
     size_t taken;
     value = base != 10 ? cast(long)s.parse_uint(&taken, base) : s.parse_int(&taken);
     return taken == s.length;
+}
+
+const(char)[] read_enum_value(ref const Variant v, const(VoidEnumInfo)* info, ref Variant parsed, long* flags)
+{
+    if (!v.isString)
+        return "Invalid value";
+    const(char)[] text = v.asString;
+    if (!text)
+        return "No value";
+
+    parsed = enum_value_icase(info, text);
+    if (!parsed.isNull)
+        return null;
+    if (flags)
+    {
+        bool ok;
+        *flags = info.parse_flags(text, ok);
+        if (ok)
+            return null;
+    }
+    return "Invalid value";
+}
+
+Variant enum_value_icase(const(VoidEnumInfo)* info, const(char)[] value)
+{
+    import urt.string.ascii : ieq;
+    foreach (i; 0 .. info.count)
+    {
+        const(char)[] key = info.key_by_sorted_index(i);
+        if (ieq(key, value))
+            return info.value_for(key);
+    }
+    return Variant();
+}
+
+
+unittest
+{
+    import urt.meta.enuminfo : bitfield;
+
+    enum Choice : byte { negative = -1, positive = 1 }
+    @bitfield enum Permissions : ubyte { read = 1, write = 2 }
+
+    Choice choice;
+    assert(!from_variant(Variant("NEGATIVE"), choice) && choice == Choice.negative);
+    assert(from_variant(Variant(1), choice) == "Invalid value");
+
+    Permissions permissions;
+    assert(!from_variant(Variant("READ"), permissions) && permissions == Permissions.read);
+    assert(!from_variant(Variant("read|write"), permissions) && cast(ubyte)permissions == 3);
+    assert(from_variant(Variant("read|unknown"), permissions) == "Invalid value");
 }
