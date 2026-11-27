@@ -265,16 +265,12 @@ nothrow @nogc:
 
     override void encode_sub(SyncPeer peer, const(char)[] pattern)
     {
-        begin_frame(Verb.sub);
-        _buf.put_str(pattern);
-        send_frame(peer);
+        encode_pattern(peer, Verb.sub, pattern);
     }
 
     override void encode_unsub(SyncPeer peer, const(char)[] pattern)
     {
-        begin_frame(Verb.unsub);
-        _buf.put_str(pattern);
-        send_frame(peer);
+        encode_pattern(peer, Verb.unsub, pattern);
     }
 
     override void encode_enum_req(SyncPeer peer, const(char)[] type_name, uint seq)
@@ -516,11 +512,8 @@ nothrow @nogc:
 
     override void encode_res(SyncPeer peer, uint seq)
     {
-        begin_frame(Verb.res);
-        _buf.put_varint(seq);
         Variant none;
-        _buf.put_variant(none);
-        send_frame(peer);
+        encode_res(peer, seq, none);
     }
 
     override void encode_res(SyncPeer peer, uint seq, ref const Variant value)
@@ -1082,6 +1075,13 @@ nothrow @nogc:
 
 private:
     Array!ubyte _buf;
+
+    void encode_pattern(SyncPeer peer, Verb verb, const(char)[] pattern)
+    {
+        begin_frame(verb);
+        _buf.put_str(pattern);
+        send_frame(peer);
+    }
 
     void encode_text_command(SyncPeer peer, Verb verb, uint seq, const(char)[] text)
     {
