@@ -271,6 +271,10 @@ ifdef BAREMETAL_DIR
     BAREMETAL_LD := $(URT_PLATFORMS)/bk7231/$(PLATFORM).ld
   else ifeq ($(PLATFORM),rp2350)
     BAREMETAL_LD := $(URT_PLATFORMS)/rp2350/rp2350.ld
+    ifeq ($(CONFIG)/$(COMPILER),release/ldc)
+      # Use --keep-unique for functions whose addresses serve as identities.
+      DFLAGS += --addrsig -L--icf=all
+    endif
   else ifeq ($(PLATFORM),mt7621)
     BAREMETAL_LD := $(URT_PLATFORMS)/mt7621/mt7621.ld
     BOARD_RAM_SIZE ?= 64MB
