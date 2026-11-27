@@ -1759,15 +1759,25 @@ void ElemOnChange(alias fn)(BaseObject item, ref const SampleUpdate update) noth
         __traits(child, instance, fn)();
 }
 
-Variant SynthDefault(U)() nothrow @nogc
+template SynthDefault(U)
 {
-    static if (is(U == Variant))
-        return Variant();
-    else static if (__traits(compiles, { U v = U.init; return to_variant(v); }))
-        return to_variant(U.init);
+    import urt.traits : is_some_int;
+
+    static if (is_some_int!U)
+        alias SynthDefault = synth_integer_default;
+    else static if (is(U == Variant) || !__traits(compiles, { U v = U.init; return to_variant(v); }))
+        alias SynthDefault = synth_null_default;
     else
-        return Variant();   // unsupported; schema reports null
+        Variant SynthDefault() nothrow @nogc
+            => to_variant(U.init);
 }
+
+Variant synth_integer_default() nothrow @nogc
+    => Variant(0);
+
+Variant synth_null_default() nothrow @nogc
+    => Variant();
+
 
 template SynthSuggest(Setters...)
 {
