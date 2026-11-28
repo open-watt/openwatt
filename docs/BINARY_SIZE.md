@@ -209,6 +209,13 @@ the RAM-image workspace excluded.
 | date | commit | compiler | flash | ram | limit | note |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-09 | 62a6417e | ldc 1.43.0 | 1,078,400 | 71,764 | 1,083,040 | first row; 99% full, 4,640 bytes of headroom |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 1,073,561 | 73,148 | 1,083,040 | aggressive identical code folding saves 22,478 packed bytes vs 742d15fe, which overflowed by 12,999 bytes |
+
+### BK7231T, `make PLATFORM=bk7231t CONFIG=release`
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 1,077,850 | 77,041 | 1,083,264 | aggressive identical code folding saves 22,778 packed bytes vs 742d15fe, which overflowed by 17,364 bytes |
 
 ### RP2350, `make PLATFORM=rp2350 CONFIG=release`
 
@@ -246,6 +253,8 @@ Limit is the linker script's `FLASH` region, not the board: the Y23A-RP2350B car
 | 2026-11-25 | codex/embedded-code-size-followup / urt 155ed39 | ldc 1.43.0 | 1,516,572 | 46,440 | 4,194,304 | combined follow-up saves 18,872 bytes |
 | 2026-11-25 | b1b1fe48 / urt 27f6ab1 | ldc 1.43.0 | 1,509,836 | 46,440 | 4,194,304 | matched control for the shared two-word move |
 | 2026-11-25 | #996 / urt 6007f4e | ldc 1.43.0 | 1,508,444 | 46,440 | 4,194,304 | two-word move saves 1,392 bytes |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 1,462,036 | 48,000 | 4,194,304 | matched master control for #1011 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 1,407,348 | 48,000 | 4,194,304 | aggressive identical code folding saves 54,688 bytes |
 
 ### MT7621 hEX S, `make BOARD=rb760igs CONFIG=release`
 
@@ -261,6 +270,8 @@ a netbooted image is bounded by RAM instead.
 | 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,632 | 56,092 | 16,515,072 | + SFP interface and binding (#774), RouterBOOT identity (#778), recovery rung (#776), urt #337 time, BOARD_CPU_HZ; RAM is routerboot's 4 KB sector buffer |
 | 2026-09-26 | all MT7621 PRs merged | ldc 1.43.0 | 2,822,360 | 52,028 | 16,515,072 | port-as-handle Ethernet API (urt#332, #772, #774): no dispatch tables; routerboot's sector buffer on the stack |
 | 2026-09-27 | all MT7621 PRs merged + #782 | ldc 1.43.0 | 2,824,760 | 52,044 | 16,515,072 | GE2 and the AR8033 fibre PHY in urt (urt#347); sfp1 data path |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 2,608,884 | 57,464 | 16,515,072 | matched master control for #1011 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 2,490,388 | 57,464 | 16,515,072 | aggressive identical code folding saves 118,496 loaded bytes |
 
 ### BL808, `make PLATFORM=bl808 CONFIG=release`
 
@@ -272,6 +283,17 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-08 | ow/console-prints | ldc 1.43.0 | 2,647,864 | 186,266 | 4,190,208 | M0 packing D0 (1,009,089 flash, 88,144 ram); console tables and `/system/fs/read` print through the stream's pull |
 | 2026-10-10 | ow/http-respond | ldc 1.43.0 | 2,639,768 | 186,258 | 4,190,208 | M0 packing D0 (1,008,331 flash, 88,144 ram); console output and HTTP responses are producers the stream pulls |
 | 2026-11-01 | ow/tx-floor | ldc 1.43.0 | 2,652,920 | 186,266 | 4,190,208 | M0 packing D0 (1,013,283 flash, 88,168 ram); interfaces admit by class and invite waiting producers in turn |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 3,469,361 | 187,818 | 4,190,208 | matched #1011 control with 2,487,448 B M0 and 981,913 B packed D0 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 3,375,657 | 187,818 | 4,190,208 | aggressive identical code folding saves 93,704 B across M0 (2,405,592 B) and packed D0 (970,065 B) |
+
+### BL808 D0, `make PLATFORM=bl808_d0 CONFIG=release`
+
+The packaged D0 payload is also included in the combined BL808 image above.
+
+| date | commit | compiler | flash | ram | limit | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 981,913 | 90,704 | - | matched master control for #1011 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 970,065 | 90,704 | - | aggressive identical code folding saves 11,848 packed bytes |
 
 ### BL618, `make PLATFORM=bl618 CONFIG=release`
 
@@ -279,6 +301,8 @@ a netbooted image is bounded by RAM instead.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-23 | #747 | ldc 1.43.0 | 2,237,328 | 53,248 | - | first row; boot guard ladder and retained reset record |
 | 2026-09-23 | ba8561fb | ldc 1.43.0 | 2,237,392 | 53,248 | - | RTC persistence changes; BL618 wall-time retention remains unimplemented |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 2,167,792 | 54,428 | - | matched master control for #1011 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 2,090,928 | 54,428 | - | aggressive identical code folding saves 76,864 bytes |
 
 ### DevEBox STM32H7XX_M, `make BOARD=devebox-h7xx-m CONFIG=release`
 
@@ -291,6 +315,19 @@ a netbooted image is bounded by RAM instead.
 | 2026-10-02 | ow/drivers-to-spec | ldc 1.43.0 | 1,657,824 | 50,444 | 2,097,152 | UART RX by event with H7 FIFOs, RS-485 DE, RTS/CTS, LPUART1 and rings at open; PWM on TIM1-4 and TIM8; IWDG and reset cause; EXTI buttons; debug freeze |
 | 2026-10-04 | #800 | ldc 1.43.0 | 1,661,480 | 50,332 | 2,097,152 | live RX retime, rx-latency and rx-gap with actual- read-backs |
 | 2026-10-08 | #825 | ldc 1.43.0 | 1,686,272 | 51,100 | 2,097,152 | doorbells; also the first row with the stream and sync series since #800 |
+| 2026-11-28 | 742d15fe | ldc 1.43.0 | 1,481,184 | 52,160 | 2,097,152 | matched master control for #1011 |
+| 2026-11-28 | #1011 | ldc 1.43.0 | 1,423,376 | 52,160 | 2,097,152 | aggressive identical code folding saves 57,808 bytes |
+
+### STM32F4 and STM32F7 link overflows
+
+The following LDC 1.43.0 release builds still exceed their flash regions with #1011.
+No firmware image was produced for these configurations.
+
+| configuration | master overflow | #1011 overflow | reduction |
+| --- | --- | --- | --- |
+| `make BOARD=jz-f407vet6 CONFIG=release` | 84,920 B | 71,256 B | 13,664 B |
+| `make BOARD=jz-f407vet6 CONFIG=release FEATURES=switch` | 84,920 B | 71,256 B | 13,664 B |
+| `make PLATFORM=stm32f7 CONFIG=release` | 431,168 B | 373,296 B | 57,872 B |
 
 Add a section for any other configuration the first time it is deployed. Keep the make
 invocation in the heading exact, including FEATURES, HEADLESS, IPV6 and GATEWAY when they
